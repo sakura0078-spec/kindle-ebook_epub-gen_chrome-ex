@@ -19,9 +19,9 @@
   const qualityVal = document.getElementById('qualityVal');
   const settingDirection = document.getElementById('settingDirection');
   const settingMaxPages = document.getElementById('settingMaxPages');
-  const autoInterval = document.getElementById('autoInterval');
-  const manualIntervalWrap = document.getElementById('manualIntervalWrap');
-  const fixedInterval = document.getElementById('fixedInterval');
+  const settingInterval = document.getElementById('settingInterval');
+  const intervalVal = document.getElementById('intervalVal');
+  const settingSubfolder = document.getElementById('settingSubfolder');
   const progressBar = document.getElementById('progressBar');
   const pageCount = document.getElementById('pageCount');
   const timeRemaining = document.getElementById('timeRemaining');
@@ -38,6 +38,7 @@
   const chkShowOverlay = document.getElementById('chkShowOverlay');
   const settingRatioPreset = document.getElementById('settingRatioPreset');
   const frameScale = document.getElementById('frameScale');
+  const frameScaleVal = document.getElementById('frameScaleVal');
   const btnResetFrame = document.getElementById('btnResetFrame');
   const btnReloadMetadata = document.getElementById('btnReloadMetadata');
   const chkUseFirstPageAsCover = document.getElementById('chkUseFirstPageAsCover');
@@ -70,8 +71,21 @@
     qualityVal.textContent = e.target.value + '%';
   });
 
-  autoInterval.addEventListener('change', (e) => {
-    manualIntervalWrap.classList.toggle('hidden', e.target.checked);
+  // 所要時間スライダーの更新
+  settingInterval.addEventListener('input', (e) => {
+    const s = (parseInt(e.target.value, 10) / 1000).toFixed(1);
+    intervalVal.textContent = s + ' 秒';
+  });
+
+  // 保存先フォルダの永続化
+  chrome.storage.local.get(['subfolder'], (res) => {
+    if (res && res.subfolder) {
+      settingSubfolder.value = res.subfolder;
+    }
+  });
+  settingSubfolder.addEventListener('change', () => {
+    const val = settingSubfolder.value.trim() || 'KindleBooks';
+    chrome.storage.local.set({ subfolder: val });
   });
 
   frameScale.addEventListener('input', (e) => {
@@ -237,27 +251,31 @@
 
     const mode = settingMode.value;
     if (mode === 'fixed') {
-      // 画面キャプチャ実行
-      chrome.runtime.sendMessage({
-        type: 'CAPTURE_VISIBLE_TAB',
-        format: settingFormat.value === 'image/png' ? 'png' : 'jpeg',
-        quality: parseInt(settingQuality.value, 10),
-        windowId: tab.windowId
-      }, async (res) => {
-        if (!res || !res.success || !res.dataUrl) {
-          console.error("[Sidepanel] Capture failed:", res?.error);
-          pauseScan();
-          warningAlert.textContent = '画面キャプチャに失敗しました: ' + (res?.error || '不明なエラー');
-          warningAlert.classList.remove('hidden');
-          return;
-        }
+      // 枠線の映り込み防止: 撮影の瞬間だけ画面上の枠を非表示にする
+      chrome.tabs.sendMessage(tab.id, { action: 'HIDE_OVERLAY_FOR_CAPTURE' }, () => {
+        chrome.runtime.sendMessage({
+          type: 'CAPTURE_VISIBLE_TAB',
+          format: settingFormat.value === 'image/png' ? 'png' : 'jpeg',
+          quality: parseInt(settingQuality.value, 10),
+          windowId: tab.windowId
+        }, async (res) => {
+          // 撮影完了後、直ちに枠の表示状態を元に戻す
+          chrome.tabs.sendMessage(tab.id, { action: 'RESTORE_OVERLAY' }, () => {});
 
-        clearTimeout(timeoutTimer);
-        warningAlert.classList.add('hidden');
+          if (!res || !res.success || !res.dataUrl) {
+            console.error("[Sidepanel] Capture failed:", res?.error);
+            pauseScan();
+            warningAlert.textContent = '画面キャプチャに失敗しました: ' + (res?.error || '不明なエラー');
+            warningAlert.classList.remove('hidden');
+            return;
+          }
 
-        // 指定機種比率のキャプチャ枠に合わせてクロップ
-        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false) }, async (cropArea) => {
-          const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+          clearTimeout(timeoutTimer);
+          warningAlert.classList.add('hidden');
+
+          // 指定機種比率のキャプチャ枠に合わせてクロップ（isCapture: true で枠線インセット適用）
+          chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false), isCapture: true }, async (cropArea) => {
+            const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
 
           // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
           const sample = finalDataUrl.substring(finalDataUrl.length - 200);
@@ -330,7 +348,7 @@
     chrome.tabs.sendMessage(tabId, { action: 'NEXT_PAGE', direction: settingDirection.value }, (res) => {
       // 描画待機＆ロードインジケーター確認
       chrome.tabs.sendMessage(tabId, { action: 'CHECK_RENDER_COMPLETE' }, () => {
-        const waitTime = autoInterval.checked ? 900 : parseInt(fixedInterval.value, 10);
+        const waitTime = parseInt(settingInterval.value, 10) || 900;
         scanTimer = setTimeout(() => {
           loopNextStep();
         }, waitTime);
@@ -412,12 +430,15 @@
 
       const epubBlob = await builder.build();
       const blobUrl = URL.createObjectURL(epubBlob);
-      const safeTitle = (metaTitle.value || 'Kindle_Book').replace(/[/\\?%*:|"<>]/g, '_');
+      // ファイル名は純粋な書籍名のみ（著者名は含めない、Windows禁止文字を置換）
+      let rawTitle = metaTitle.value ? metaTitle.value.trim() : 'Kindle_Book';
+      const safeTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'Kindle_Book';
       const filename = `${safeTitle}.epub`;
+      const subfolder = (settingSubfolder.value && settingSubfolder.value.trim()) || 'KindleBooks';
 
       chrome.runtime.sendMessage({
         type: 'SAVE_EPUB_FILE',
-        subfolder: 'KindleBooks',
+        subfolder,
         filename,
         blobUrl
       }, (res) => {

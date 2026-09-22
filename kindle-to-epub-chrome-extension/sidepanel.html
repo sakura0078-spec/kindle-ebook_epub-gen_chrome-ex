@@ -90,15 +90,18 @@
       </div>
 
       <div class="setting-row">
-        <label>めくり待機</label>
-        <div class="interval-controls">
-          <label class="checkbox-label">
-            <input type="checkbox" id="autoInterval" checked> 自動検知
-          </label>
-          <div id="manualIntervalWrap" class="hidden">
-            <input type="number" id="fixedInterval" min="500" max="10000" step="100" value="1500"> ms
-          </div>
+        <label>1頁の所要時間: <span id="intervalVal" style="font-weight: bold; color: #10b981;">0.9 秒</span></label>
+        <div style="display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 4px;">
+          <span style="font-size: 11px; color: #6b7280;">最速(0.8s)</span>
+          <input type="range" id="settingInterval" min="800" max="2500" step="100" value="900" style="flex: 1;">
+          <span style="font-size: 11px; color: #6b7280;">安全(2.5s)</span>
         </div>
+        <p style="font-size: 10px; color: #9ca3af; margin-top: 4px;">※ 最短で安全な0.8〜1.0秒推奨。仕上がりの描画遅れを見て調整してください。</p>
+      </div>
+
+      <div class="setting-row">
+        <label>保存先フォルダ (Downloads配下)</label>
+        <input type="text" id="settingSubfolder" value="KindleBooks" placeholder="例: KindleBooks" style="width: 150px;">
       </div>
     </section>
 

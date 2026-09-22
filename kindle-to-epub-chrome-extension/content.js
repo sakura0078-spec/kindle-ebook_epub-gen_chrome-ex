@@ -12,7 +12,19 @@
         sendResponse(checkSinglePageView());
         break;
       case 'DETECT_CROP_AREA':
-        sendResponse(calculateRatioFrame(req.config));
+        sendResponse(calculateRatioFrame(req.config, req.isCapture));
+        break;
+      case 'HIDE_OVERLAY_FOR_CAPTURE':
+        if (overlayElement) {
+          overlayElement.style.visibility = 'hidden';
+        }
+        sendResponse({ success: true });
+        break;
+      case 'RESTORE_OVERLAY':
+        if (overlayElement) {
+          overlayElement.style.visibility = 'visible';
+        }
+        sendResponse({ success: true });
         break;
       case 'TOGGLE_CROP_OVERLAY':
         if (window === window.top) {
@@ -77,7 +89,7 @@
     return 20 / 9; // A302ZT / 20:9 (約 2.2222)
   }
 
-  function calculateRatioFrame(config) {
+  function calculateRatioFrame(config, isCapture = false) {
     const cfg = config || currentFrameConfig;
     const ratioHtoW = parseRatio(cfg.preset); // height / width
     const scale = (cfg.scale || 85) / 100;
@@ -90,14 +102,25 @@
     const baseTop = (window.innerHeight - targetHeight) / 2;
     const baseLeft = (window.innerWidth - targetWidth) / 2;
 
-    const top = baseTop + (cfg.centerOffset?.y || 0);
-    const left = baseLeft + (cfg.centerOffset?.x || 0);
+    let top = baseTop + (cfg.centerOffset?.y || 0);
+    let left = baseLeft + (cfg.centerOffset?.x || 0);
+    let width = targetWidth;
+    let height = targetHeight;
+
+    // キャプチャ時：枠線（3px）の内側を切り抜く安全インセット
+    if (isCapture) {
+      const inset = 3;
+      top += inset;
+      left += inset;
+      width = Math.max(10, width - inset * 2);
+      height = Math.max(10, height - inset * 2);
+    }
 
     return {
       top: Math.round(top),
       left: Math.round(left),
-      width: targetWidth,
-      height: targetHeight,
+      width: Math.round(width),
+      height: Math.round(height),
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
       dpr: window.devicePixelRatio || 1
