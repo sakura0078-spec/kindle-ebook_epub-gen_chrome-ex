@@ -36,11 +36,10 @@
   const btnCompleteNow = document.getElementById('btnCompleteNow');
   const subActions = document.getElementById('subActions');
   const chkShowOverlay = document.getElementById('chkShowOverlay');
-  const cropTop = document.getElementById('cropTop');
-  const cropBottom = document.getElementById('cropBottom');
-  const cropLeft = document.getElementById('cropLeft');
-  const cropRight = document.getElementById('cropRight');
-  const btnDetectArea = document.getElementById('btnDetectArea');
+  const settingRatioPreset = document.getElementById('settingRatioPreset');
+  const frameScale = document.getElementById('frameScale');
+  const frameScaleVal = document.getElementById('frameScaleVal');
+  const btnResetFrame = document.getElementById('btnResetFrame');
 
   // IndexedDB初期化 (メモリクラッシュ防止)
   let db = null;
@@ -62,46 +61,42 @@
     manualIntervalWrap.classList.toggle('hidden', e.target.checked);
   });
 
-  function updateCropOverlay() {
+  frameScale.addEventListener('input', (e) => {
+    frameScaleVal.textContent = e.target.value + '%';
+    updateCropOverlay(false);
+  });
+
+  settingRatioPreset.addEventListener('change', () => {
+    updateCropOverlay(true);
+  });
+
+  chkShowOverlay.addEventListener('change', () => {
+    updateCropOverlay(false);
+  });
+
+  btnResetFrame.addEventListener('click', () => {
+    updateCropOverlay(true);
+  });
+
+  function getFrameConfig(resetPosition = false) {
+    return {
+      preset: settingRatioPreset.value || '20:9',
+      scale: parseInt(frameScale.value, 10) || 85,
+      resetPosition
+    };
+  }
+
+  function updateCropOverlay(resetPosition = false) {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
       if (tab && tab.id) {
         chrome.tabs.sendMessage(tab.id, {
           action: 'TOGGLE_CROP_OVERLAY',
           show: chkShowOverlay.checked,
-          margins: getCropMargins()
+          config: getFrameConfig(resetPosition)
         }, () => { if (chrome.runtime.lastError) {} });
       }
     });
   }
-
-  function getCropMargins() {
-    return {
-      top: parseInt(cropTop.value, 10) || 0,
-      bottom: parseInt(cropBottom.value, 10) || 0,
-      left: parseInt(cropLeft.value, 10) || 0,
-      right: parseInt(cropRight.value, 10) || 0
-    };
-  }
-
-  chkShowOverlay.addEventListener('change', updateCropOverlay);
-  [cropTop, cropBottom, cropLeft, cropRight].forEach(inp => {
-    inp.addEventListener('input', updateCropOverlay);
-  });
-
-  btnDetectArea.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (tab && tab.id) {
-        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', margins: getCropMargins() }, (area) => {
-          if (chrome.runtime.lastError || !area) {
-            statusMessage.textContent = 'Kindleタブをアクティブにして再試行してください';
-            return;
-          }
-          updateCropOverlay();
-          statusMessage.textContent = `スキャン領域検知: 幅${Math.round(area.width)}px × 高${Math.round(area.height)}px`;
-        });
-      }
-    });
-  });
 
   btnStart.addEventListener('click', startScan);
   btnPause.addEventListener('click', pauseScan);
@@ -205,8 +200,8 @@
         clearTimeout(timeoutTimer);
         warningAlert.classList.add('hidden');
 
-        // 書籍領域に合わせてクロップ
-        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', margins: getCropMargins() }, async (cropArea) => {
+        // 指定機種比率のキャプチャ枠に合わせてクロップ
+        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false) }, async (cropArea) => {
           const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
 
           // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
@@ -335,7 +330,8 @@
         author: metaAuthor.value || '不明な著者',
         direction: settingDirection.value === 'ltr' ? 'ltr' : 'rtl'
       }, {
-        mode: settingMode.value
+        mode: settingMode.value,
+        ratioPreset: settingRatioPreset.value || '20:9'
       });
 
       // IndexedDBから全ページを順次読み込み

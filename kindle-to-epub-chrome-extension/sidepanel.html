@@ -83,41 +83,39 @@
       </div>
     </section>
 
-    <!-- スキャン領域設定 (自動検知 ＋ 視覚的プレビュー枠 ＋ 手動微調整) -->
+    <!-- スキャン領域設定 (機種別比率プリセット ＋ 最適枠表示) -->
     <section class="section-card">
       <div class="section-header-flex">
-        <h2 class="section-title">スキャン領域 (自動検知＆微調整)</h2>
-        <button id="btnDetectArea" class="btn-link">再検知</button>
+        <h2 class="section-title">キャプチャ枠（機種比率）</h2>
+        <button id="btnResetFrame" class="btn-link">枠を中央にリセット</button>
+      </div>
+
+      <div class="setting-row">
+        <label>対象機種・比率</label>
+        <select id="settingRatioPreset">
+          <option value="20:9" selected>★ A302ZT / 縦長スマホ (20:9)</option>
+          <option value="19.5:9">iPhone / 標準スマホ (19.5:9)</option>
+          <option value="16:9">汎用ブック / タブレット (16:9)</option>
+        </select>
       </div>
 
       <div class="setting-row">
         <label class="checkbox-label font-medium">
           <input type="checkbox" id="chkShowOverlay" checked>
-          <span>Kindle画面にプレビュー枠を表示</span>
+          <span>Kindle画面にキャプチャ枠を表示</span>
         </label>
       </div>
 
       <div class="crop-adjust-box">
-        <span class="crop-adjust-title">トリミング余白の微調整 (px)</span>
-        <div class="crop-grid">
-          <div class="crop-input-item">
-            <label>上 (Top)</label>
-            <input type="number" id="cropTop" value="0" step="2">
-          </div>
-          <div class="crop-input-item">
-            <label>下 (Bottom)</label>
-            <input type="number" id="cropBottom" value="0" step="2">
-          </div>
-          <div class="crop-input-item">
-            <label>左 (Left)</label>
-            <input type="number" id="cropLeft" value="0" step="2">
-          </div>
-          <div class="crop-input-item">
-            <label>右 (Right)</label>
-            <input type="number" id="cropRight" value="0" step="2">
-          </div>
+        <span class="crop-adjust-title">枠のサイズ調整（比率維持）</span>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+          <input type="range" id="frameScale" min="40" max="100" value="85" style="flex: 1;">
+          <span id="frameScaleVal" style="font-size: 12px; font-weight: bold; width: 40px; text-align: right;">85%</span>
         </div>
-        <p class="crop-note">※ ヘッダーや外枠黒帯を除去し、書籍の本文・イラストのみを切り抜いて保存します</p>
+        <p class="crop-note" style="margin-top: 8px;">
+          ※ 画面上の枠は<strong>ドラッグして位置移動</strong>できます。<br>
+          ※ Kindleの「Aa」ボタンで文字サイズや行間を調整し、枠内に綺麗に収めてからスキャンを開始してください。
+        </p>
       </div>
     </section>
 

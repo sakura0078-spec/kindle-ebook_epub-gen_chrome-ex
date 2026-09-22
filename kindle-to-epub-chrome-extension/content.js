@@ -12,10 +12,10 @@
         sendResponse(checkSinglePageView());
         break;
       case 'DETECT_CROP_AREA':
-        sendResponse(detectBookArea(req.margins));
+        sendResponse(calculateRatioFrame(req.config));
         break;
       case 'TOGGLE_CROP_OVERLAY':
-        toggleCropOverlay(req.show, req.margins);
+        toggleCropOverlay(req.show, req.config);
         sendResponse({ success: true });
         break;
       case 'NEXT_PAGE':
@@ -62,55 +62,53 @@
     return null;
   }
 
-  function detectBookArea(margins = { top: 0, bottom: 0, left: 0, right: 0 }) {
-    // Kindle ViewerのメインCanvasまたは描画コンテナを自動検索
-    const target = findElementAcrossFrames('canvas#kindleReader_canvas, canvas, #kindleReader_container, .book-page, main');
-    let rect = { top: 60, left: 100, width: window.innerWidth - 200, height: window.innerHeight - 120 };
+  // 機種別比率キャプチャ枠の状態管理
+  let currentFrameConfig = {
+    preset: '20:9',
+    scale: 0.85,
+    centerOffset: { x: 0, y: 0 }
+  };
 
-    if (target) {
-      let b = target.getBoundingClientRect();
-      // iframe内の場合は親ウィンドウのオフセットを加算
-      if (target.ownerDocument !== document) {
-        const iframes = document.querySelectorAll('iframe');
-        for (const iframe of iframes) {
-          if (iframe.contentDocument === target.ownerDocument) {
-            const ifr = iframe.getBoundingClientRect();
-            b = {
-              top: b.top + ifr.top,
-              left: b.left + ifr.left,
-              width: b.width,
-              height: b.height
-            };
-            break;
-          }
-        }
-      }
+  function parseRatio(preset) {
+    if (preset === '19.5:9') return 19.5 / 9; // 約 2.1667
+    if (preset === '16:9') return 16 / 9;     // 約 1.7778
+    return 20 / 9; // A302ZT / 20:9 (約 2.2222)
+  }
 
-      if (b.width > 150 && b.height > 150) {
-        rect = {
-          top: Math.max(0, b.top),
-          left: Math.max(0, b.left),
-          width: b.width,
-          height: b.height
-        };
-      }
-    }
+  function calculateRatioFrame(config) {
+    const cfg = config || currentFrameConfig;
+    const ratioHtoW = parseRatio(cfg.preset); // height / width
+    const scale = (cfg.scale || 85) / 100;
 
-    // マージン微調整を加味
-    const adjusted = {
-      top: Math.max(0, rect.top + (margins.top || 0)),
-      left: Math.max(0, rect.left + (margins.left || 0)),
-      width: Math.max(50, rect.width - (margins.left || 0) - (margins.right || 0)),
-      height: Math.max(50, rect.height - (margins.top || 0) - (margins.bottom || 0)),
+    // ビューポートの高さ基準（ヘッダーとシークバーの余白を考慮した最大利用可能高）
+    const maxUsableHeight = window.innerHeight * 0.90;
+    const targetHeight = Math.min(maxUsableHeight * scale, window.innerHeight - 80);
+    const targetWidth = targetHeight / ratioHtoW;
+
+    const baseTop = (window.innerHeight - targetHeight) / 2;
+    const baseLeft = (window.innerWidth - targetWidth) / 2;
+
+    const top = Math.max(10, Math.min(window.innerHeight - targetHeight - 10, baseTop + (cfg.centerOffset?.y || 0)));
+    const left = Math.max(10, Math.min(window.innerWidth - targetWidth - 10, baseLeft + (cfg.centerOffset?.x || 0)));
+
+    return {
+      top: Math.round(top),
+      left: Math.round(left),
+      width: Math.round(targetWidth),
+      height: Math.round(targetHeight),
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
       dpr: window.devicePixelRatio || 1
     };
-
-    return adjusted;
   }
 
-  function toggleCropOverlay(show, margins) {
+  function toggleCropOverlay(show, config) {
+    if (config) {
+      if (config.preset) currentFrameConfig.preset = config.preset;
+      if (typeof config.scale === 'number') currentFrameConfig.scale = config.scale;
+      if (config.resetPosition) currentFrameConfig.centerOffset = { x: 0, y: 0 };
+    }
+
     if (!show) {
       if (overlayElement) {
         overlayElement.remove();
@@ -119,32 +117,77 @@
       return;
     }
 
-    const area = detectBookArea(margins);
+    const area = calculateRatioFrame(currentFrameConfig);
     if (!overlayElement) {
       overlayElement = document.createElement('div');
       overlayElement.id = 'kindle-epub-crop-overlay';
       overlayElement.style.position = 'fixed';
-      overlayElement.style.pointerEvents = 'none';
-      overlayElement.style.border = '3px dashed #10b981';
-      overlayElement.style.backgroundColor = 'rgba(16, 185, 129, 0.08)';
-      overlayElement.style.boxShadow = '0 0 0 9999px rgba(0, 0, 0, 0.35)';
+      overlayElement.style.pointerEvents = 'auto'; // ドラッグ可能にする
+      overlayElement.style.cursor = 'move';
+      overlayElement.style.border = '3px solid #10b981';
+      overlayElement.style.backgroundColor = 'rgba(16, 185, 129, 0.04)';
+      overlayElement.style.boxShadow = '0 0 0 9999px rgba(0, 0, 0, 0.45)';
       overlayElement.style.zIndex = '999999';
-      overlayElement.style.transition = 'all 0.15s ease-out';
-      
+      overlayElement.style.userSelect = 'none';
+      overlayElement.style.boxSizing = 'border-box';
+      overlayElement.style.transition = 'box-shadow 0.2s ease';
+
+      // 枠ラベル
       const label = document.createElement('div');
-      label.textContent = '【スキャン対象領域（自動検知）】';
+      label.id = 'crop-overlay-label';
       label.style.position = 'absolute';
       label.style.top = '-26px';
       label.style.left = '0';
       label.style.background = '#10b981';
       label.style.color = '#fff';
       label.style.fontSize = '12px';
-      label.style.padding = '2px 8px';
+      label.style.padding = '2px 10px';
       label.style.borderRadius = '4px 4px 0 0';
       label.style.fontWeight = 'bold';
+      label.style.pointerEvents = 'none';
       overlayElement.appendChild(label);
 
+      // ドラッグ移動の実装
+      let isDragging = false;
+      let startX = 0, startY = 0;
+      let initOffsetX = 0, initOffsetY = 0;
+
+      overlayElement.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initOffsetX = currentFrameConfig.centerOffset.x;
+        initOffsetY = currentFrameConfig.centerOffset.y;
+        overlayElement.style.borderColor = '#059669';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging || !overlayElement) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        currentFrameConfig.centerOffset.x = initOffsetX + dx;
+        currentFrameConfig.centerOffset.y = initOffsetY + dy;
+
+        const updatedArea = calculateRatioFrame(currentFrameConfig);
+        overlayElement.style.top = updatedArea.top + 'px';
+        overlayElement.style.left = updatedArea.left + 'px';
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDragging && overlayElement) {
+          isDragging = false;
+          overlayElement.style.borderColor = '#10b981';
+        }
+      });
+
       document.body.appendChild(overlayElement);
+    }
+
+    const labelElem = overlayElement.querySelector('#crop-overlay-label');
+    if (labelElem) {
+      const presetName = currentFrameConfig.preset === '20:9' ? 'A302ZT (20:9)' : currentFrameConfig.preset;
+      labelElem.textContent = `【キャプチャ枠: ${presetName}】※ドラッグで位置調整`;
     }
 
     overlayElement.style.top = area.top + 'px';

@@ -10,9 +10,21 @@ class EpubBuilder {
       direction: options.direction || 'rtl',
       ...metadata
     };
+    let vpWidth = 1080;
+    let vpHeight = 2400; // デフォルト A302ZT (20:9)
+    if (options.ratioPreset === '19.5:9') {
+      vpWidth = 1080;
+      vpHeight = 2340;
+    } else if (options.ratioPreset === '16:9') {
+      vpWidth = 1080;
+      vpHeight = 1920;
+    }
+
     this.options = {
       mode: options.mode || 'fixed', // 'fixed' または 'reflow'
       writingMode: options.writingMode || 'vertical-rl', // 'vertical-rl' または 'horizontal-tb'
+      viewportWidth: options.viewportWidth || vpWidth,
+      viewportHeight: options.viewportHeight || vpHeight,
       ...options
     };
     this.pages = []; // 画像BlobまたはHTML文字列
@@ -96,7 +108,7 @@ rt { font-size: 0.5em; }`;
   <meta charset="UTF-8"/>
   <title>${this.metadata.title} - Page ${i + 1}</title>
   <link rel="stylesheet" type="text/css" href="style.css"/>
-  <meta name="viewport" content="width=1200, height=1920"/>
+  <meta name="viewport" content="width=${this.options.viewportWidth}, height=${this.options.viewportHeight}"/>
 </head>
 <body>
   <div>
