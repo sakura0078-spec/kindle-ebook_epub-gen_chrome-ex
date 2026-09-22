@@ -154,15 +154,36 @@
   }
 
   function extractBookInfo() {
-    let title = document.title.replace(/\s*-?\s*Kindle.*$/i, '').trim();
+    let title = '';
     let author = '不明な著者';
 
-    const titleElem = findElementAcrossFrames('#header-title, [data-testid="header-title"], .book-title, #title');
+    // 1. 実機Kindle Cloud Readerヘッダー要素から探索
+    const titleElem = findElementAcrossFrames('ion-title.top-chrome__book-title, ion-title, [class*="book-title"], #header-title, [data-testid="header-title"], #title');
     if (titleElem && titleElem.textContent) {
-      title = titleElem.textContent.trim();
+      const text = titleElem.textContent.trim();
+      if (text && !/^kindle$/i.test(text)) {
+        title = text;
+      }
     }
 
-    const authorElem = findElementAcrossFrames('#header-author, [data-testid="header-author"], .book-author, #author');
+    // 2. document.title から探索（単なる "Kindle" 以外の場合）
+    if (!title && document.title) {
+      const docTitle = document.title.replace(/\s*-?\s*Kindle.*$/i, '').trim();
+      if (docTitle && !/^kindle$/i.test(docTitle)) {
+        title = docTitle;
+      }
+    }
+
+    // 3. URLパラメータ (asin) からフォールバック
+    if (!title) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const asin = urlParams.get('asin');
+      if (asin) {
+        title = `Kindle_Book_${asin}`;
+      }
+    }
+
+    const authorElem = findElementAcrossFrames('ion-title.top-chrome__book-author, [class*="book-author"], #header-author, [data-testid="header-author"], #author');
     if (authorElem && authorElem.textContent) {
       author = authorElem.textContent.trim();
     }
@@ -209,19 +230,20 @@
   }
 
   async function turnNextPage(direction = 'rtl') {
+    // 縦書き(RTL): キー操作は ArrowLeft、横書き(LTR): ArrowRight
     const key = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
     const keyCode = direction === 'rtl' ? 37 : 39;
 
     dispatchKeyEventAcrossFrames(key, keyCode);
 
-    // クリック対象があれば併用
-    const nextBtnSelectors = direction === 'rtl' 
-      ? '#btnLeft, .turn-left, .next-button, #kindleReader_button_next, [aria-label*="次"]'
-      : '#btnRight, .turn-right, .next-button, #kindleReader_button_next, [aria-label*="次"]';
-    const nextBtn = findElementAcrossFrames(nextBtnSelectors);
+    // Amazon Kindle Web Reader では、ボタン「次のページ」は常に button#kr-chevron-right (aria-label="次のページ")
+    const nextBtn = findElementAcrossFrames('button#kr-chevron-right, button[aria-label="次のページ"]');
     if (nextBtn) {
       try { nextBtn.click(); } catch(e) {}
     }
+
+    // 意図せずサイドバーやダイアログが開いていないかチェックし、開いている場合は閉じる
+    dismissOverlays();
 
     return { success: true };
   }
@@ -232,15 +254,28 @@
 
     dispatchKeyEventAcrossFrames(key, keyCode);
 
-    const prevBtnSelectors = direction === 'rtl'
-      ? '#btnRight, .turn-right, .prev-button, #kindleReader_button_prev, [aria-label*="前"]'
-      : '#btnLeft, .turn-left, .prev-button, #kindleReader_button_prev, [aria-label*="前"]';
-    const prevBtn = findElementAcrossFrames(prevBtnSelectors);
+    // Amazon Kindle Web Reader では、ボタン「前のページ」は常に button#kr-chevron-left (aria-label="前のページ")
+    const prevBtn = findElementAcrossFrames('button#kr-chevron-left, button[aria-label="前のページ"]');
     if (prevBtn) {
       try { prevBtn.click(); } catch(e) {}
     }
 
+    dismissOverlays();
+
     return { success: true };
+  }
+
+  function dismissOverlays() {
+    // 目次サイドバー（ion-menu等）やダイアログ、オーバーレイが開いている場合は閉じる
+    const sideMenu = findElementAcrossFrames('ion-menu.show-menu, .side-menu--open, .side-navigation--open, [role="navigation"][aria-hidden="false"], ion-backdrop');
+    if (sideMenu) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      // 画面中央をクリックしてメニューを閉じるフォールバック
+      const centerBackdrop = findElementAcrossFrames('ion-backdrop, .backdrop');
+      if (centerBackdrop) {
+        try { centerBackdrop.click(); } catch(e) {}
+      }
+    }
   }
 
   function dispatchKeyEventAcrossFrames(key, keyCode) {

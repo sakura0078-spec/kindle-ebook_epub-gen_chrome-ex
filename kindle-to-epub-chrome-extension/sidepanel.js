@@ -129,6 +129,20 @@
   initBookMetadata();
 
   async function startScan() {
+    // スキャン開始時にもメタデータを再確認（ページ遷移完了後に取得できる場合があるため）
+    if (!metaTitle.value || metaTitle.value === 'Kindle_Book') {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab && tab.id) {
+          const res = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_BOOK_INFO' }, r));
+          if (res && res.title) {
+            metaTitle.value = res.title;
+            if (res.author) metaAuthor.value = res.author;
+          }
+        }
+      } catch(e) {}
+    }
+
     isScanning = true;
     isPaused = false;
     currentPage = 0;
