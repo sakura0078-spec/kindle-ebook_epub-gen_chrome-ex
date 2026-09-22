@@ -1,4 +1,4 @@
-﻿const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer-core');
 const path = require('path');
 const fs = require('fs');
 
@@ -91,6 +91,12 @@ async function runLiveTest(options = { maxPages: 5, asin: DEFAULT_ASIN }) {
       await sidepanelPage.$eval('#settingMaxPages', (el, val) => el.value = val, options.maxPages);
       console.log(`  スキャン上限ページ数設定: ${options.maxPages} ページ`);
     }
+
+    // キャプチャ枠を表示（新仕様: 起動時OFFのためテストで明示的にON）
+    await sidepanelPage.$eval('#chkShowOverlay', el => {
+      el.checked = true;
+      el.dispatchEvent(new Event('change'));
+    });
 
     await new Promise(r => setTimeout(r, 1500));
 

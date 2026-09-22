@@ -82,22 +82,22 @@
     const ratioHtoW = parseRatio(cfg.preset); // height / width
     const scale = (cfg.scale || 85) / 100;
 
-    // ビューポートの高さ基準（ヘッダーとシークバーの余白を考慮した最大利用可能高）
-    const maxUsableHeight = window.innerHeight * 0.90;
-    const targetHeight = Math.min(maxUsableHeight * scale, window.innerHeight - 80);
-    const targetWidth = targetHeight / ratioHtoW;
+    // 基本高さをウィンドウ高（マージン最小限）とし、scale(30%〜150%)を適用
+    const baseHeight = Math.max(200, window.innerHeight - 40);
+    const targetHeight = Math.max(100, Math.round(baseHeight * scale));
+    const targetWidth = Math.max(50, Math.round(targetHeight / ratioHtoW));
 
     const baseTop = (window.innerHeight - targetHeight) / 2;
     const baseLeft = (window.innerWidth - targetWidth) / 2;
 
-    const top = Math.max(10, Math.min(window.innerHeight - targetHeight - 10, baseTop + (cfg.centerOffset?.y || 0)));
-    const left = Math.max(10, Math.min(window.innerWidth - targetWidth - 10, baseLeft + (cfg.centerOffset?.x || 0)));
+    const top = baseTop + (cfg.centerOffset?.y || 0);
+    const left = baseLeft + (cfg.centerOffset?.x || 0);
 
     return {
       top: Math.round(top),
       left: Math.round(left),
-      width: Math.round(targetWidth),
-      height: Math.round(targetHeight),
+      width: targetWidth,
+      height: targetHeight,
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
       dpr: window.devicePixelRatio || 1
@@ -219,7 +219,7 @@
           // 下側ハンドルなら下ドラッグで拡大、上側なら上ドラッグで拡大
           const factor = activeHandle.includes('s') ? dy : -dy;
           const deltaScale = (factor / (window.innerHeight * 0.9)) * 100 * 1.5;
-          const newScale = Math.max(30, Math.min(100, Math.round(initScale + deltaScale)));
+          const newScale = Math.max(30, Math.min(150, Math.round(initScale + deltaScale)));
 
           if (newScale !== currentFrameConfig.scale) {
             currentFrameConfig.scale = newScale;
@@ -263,18 +263,79 @@
 
   function extractBookInfo() {
     let title = '';
-    let author = '不明な著者';
+    let author = '';
 
-    // 1. 実機Kindle Cloud Readerヘッダー要素から探索
-    const titleElem = findElementAcrossFrames('ion-title.top-chrome__book-title, ion-title, [class*="book-title"], #header-title, [data-testid="header-title"], #title');
-    if (titleElem && titleElem.textContent) {
-      const text = titleElem.textContent.trim();
-      if (text && !/^kindle$/i.test(text)) {
-        title = text;
+    // 1. 実機Kindle Cloud Readerヘッダー要素から探索（最優先）
+    const titleSelectors = [
+      'ion-title.top-chrome__book-title',
+      'ion-title.top-chrome__book-title span',
+      '.top-chrome__book-title',
+      'ion-title',
+      '[class*="book-title"]',
+      '#header-title',
+      '[data-testid="header-title"]',
+      '#title'
+    ];
+    for (const sel of titleSelectors) {
+      const elem = findElementAcrossFrames(sel);
+      if (elem && elem.textContent) {
+        const text = elem.textContent.trim();
+        if (text && !/^kindle$/i.test(text)) {
+          title = text;
+          break;
+        }
       }
     }
 
-    // 2. document.title から探索（単なる "Kindle" 以外の場合）
+    // 2. ページ内スクリプトタグ (JSON / kfw / window変数) からの探索
+    if (!title || !author) {
+      try {
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+          const content = script.textContent || '';
+          if (content.includes('title') && (content.includes('asin') || content.includes('author') || content.includes('book'))) {
+            // "title":"..." パターン
+            if (!title) {
+              const tm = content.match(/["']title["']\s*:\s*["']([^"']+)["']/i);
+              if (tm && tm[1] && !/^kindle$/i.test(tm[1])) {
+                title = tm[1];
+              }
+            }
+            if (!author) {
+              const am = content.match(/["'](?:author|authors|creator)["']\s*:\s*["']([^"']+)["']/i);
+              if (am && am[1]) {
+                author = am[1];
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. 著者名DOM要素の探索
+    if (!author) {
+      const authorSelectors = [
+        'ion-title.top-chrome__book-author',
+        '.top-chrome__book-author',
+        '[class*="book-author"]',
+        '[class*="author-name"]',
+        '#header-author',
+        '[data-testid="header-author"]',
+        '#author'
+      ];
+      for (const sel of authorSelectors) {
+        const elem = findElementAcrossFrames(sel);
+        if (elem && elem.textContent) {
+          const text = elem.textContent.trim();
+          if (text) {
+            author = text;
+            break;
+          }
+        }
+      }
+    }
+
+    // 4. document.title から探索（単なる "Kindle" 以外の場合）
     if (!title && document.title) {
       const docTitle = document.title.replace(/\s*-?\s*Kindle.*$/i, '').trim();
       if (docTitle && !/^kindle$/i.test(docTitle)) {
@@ -282,7 +343,7 @@
       }
     }
 
-    // 3. URLパラメータ (asin) からフォールバック
+    // 5. URLパラメータ (asin) からフォールバック
     if (!title) {
       const urlParams = new URLSearchParams(window.location.search);
       const asin = urlParams.get('asin');
@@ -291,12 +352,11 @@
       }
     }
 
-    const authorElem = findElementAcrossFrames('ion-title.top-chrome__book-author, [class*="book-author"], #header-author, [data-testid="header-author"], #author');
-    if (authorElem && authorElem.textContent) {
-      author = authorElem.textContent.trim();
-    }
-
-    return { title: title || 'Kindle_Book', author };
+    return {
+      title: title || 'Kindle_Book',
+      author: author || '不明な著者',
+      isDefaultTitle: !title || title === 'Kindle_Book'
+    };
   }
 
   function checkSinglePageView() {

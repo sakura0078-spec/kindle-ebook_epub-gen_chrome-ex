@@ -18,16 +18,35 @@
       <div id="viewModeNotice" class="badge-notice hidden">単一ページ推奨</div>
     </header>
 
-    <!-- 書籍情報 (自動取得 + 失敗時手動入力) -->
+    <!-- 書籍情報 (自動取得 + 失敗時手動入力 + 表紙設定) -->
     <section class="section-card">
-      <h2 class="section-title">書籍メタデータ</h2>
+      <div class="section-header-flex">
+        <h2 class="section-title">書籍メタデータ</h2>
+        <button id="btnReloadMetadata" class="btn-link" title="Kindle画面から最新のタイトル・著者名を再読み込み">🔄 再取得</button>
+      </div>
       <div class="meta-field">
         <label>タイトル</label>
         <input type="text" id="metaTitle" placeholder="書籍タイトルを自動取得中...">
       </div>
       <div class="meta-field">
         <label>著者名</label>
-        <input type="text" id="metaAuthor" placeholder="著者名を自動取得中...">
+        <input type="text" id="metaAuthor" placeholder="著者名（任意）">
+      </div>
+
+      <!-- 表紙画像（Cover）設定 (Kindle本棚対応) -->
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06);">
+        <label class="checkbox-label font-medium">
+          <input type="checkbox" id="chkUseFirstPageAsCover" checked>
+          <span>最初のページ（1ページ目）を表紙に設定</span>
+        </label>
+        <div style="margin-top: 8px;">
+          <label style="font-size: 11px; color: #6b7280; display: block; margin-bottom: 4px;">または別の表紙画像を指定（任意）:</label>
+          <input type="file" id="inputCustomCover" accept="image/jpeg,image/png,image/webp" style="font-size: 11px; width: 100%;">
+          <div id="customCoverPreview" class="hidden" style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; color: #10b981; font-weight: bold;">✓ 指定画像を表紙に設定中</span>
+            <button id="btnClearCustomCover" class="btn-link" style="font-size: 11px; color: #ef4444;">解除</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -101,7 +120,7 @@
 
       <div class="setting-row">
         <label class="checkbox-label font-medium">
-          <input type="checkbox" id="chkShowOverlay" checked>
+          <input type="checkbox" id="chkShowOverlay">
           <span>Kindle画面にキャプチャ枠を表示</span>
         </label>
       </div>
@@ -109,8 +128,8 @@
       <div class="crop-adjust-box">
         <span class="crop-adjust-title">枠のサイズ調整（比率維持）</span>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
-          <input type="range" id="frameScale" min="40" max="100" value="85" style="flex: 1;">
-          <span id="frameScaleVal" style="font-size: 12px; font-weight: bold; width: 40px; text-align: right;">85%</span>
+          <input type="range" id="frameScale" min="30" max="150" value="85" style="flex: 1;">
+          <span id="frameScaleVal" style="font-size: 12px; font-weight: bold; width: 45px; text-align: right;">85%</span>
         </div>
         <p class="crop-note" style="margin-top: 8px;">
           ※ 枠面をドラッグで<strong>位置移動</strong>、枠の四隅の丸ハンドルをドラッグで<strong>直感的にサイズ伸縮</strong>できます。<br>

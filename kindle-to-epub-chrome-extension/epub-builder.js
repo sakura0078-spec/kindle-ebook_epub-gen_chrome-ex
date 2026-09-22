@@ -27,9 +27,17 @@ class EpubBuilder {
       viewportHeight: options.viewportHeight || vpHeight,
       ...options
     };
+    this.coverImage = options.coverImage || null; // { blob, mimeType }
     this.pages = []; // 画像BlobまたはHTML文字列
     this.images = []; // 挿絵
     this.zip = new JSZip();
+  }
+
+  setCoverImage(imageBlob, mimeType = 'image/jpeg') {
+    this.coverImage = {
+      blob: imageBlob,
+      mimeType
+    };
   }
 
   addFixedPage(imageBlob, pageNum, mimeType = 'image/jpeg') {
@@ -93,6 +101,40 @@ rt { font-size: 0.5em; }`;
     manifestItems.push('<item id="style" href="style.css" media-type="text/css"/>');
     manifestItems.push('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
 
+    // 表紙画像（Kindle本棚・Send to Kindle対応）の処理
+    let coverMetaTag = '';
+    let coverSpineItem = '';
+    if (this.coverImage && this.coverImage.blob) {
+      const cExt = this.coverImage.mimeType.includes('png') ? 'png' : this.coverImage.mimeType.includes('webp') ? 'webp' : 'jpg';
+      const coverFilename = `cover.${cExt}`;
+      oebps.file(`images/${coverFilename}`, this.coverImage.blob);
+
+      // EPUB 3 cover-image プロパティ
+      manifestItems.push(`<item id="cover-image" href="images/${coverFilename}" media-type="${this.coverImage.mimeType}" properties="cover-image"/>`);
+      // Kindle / EPUB 2 互換メタデータ
+      coverMetaTag = '<meta name="cover" content="cover-image"/>';
+
+      // 表紙XHTMLページ (cover.xhtml)
+      const coverXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ja">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Cover</title>
+  <link rel="stylesheet" type="text/css" href="style.css"/>
+  <meta name="viewport" content="width=${this.options.viewportWidth}, height=${this.options.viewportHeight}"/>
+</head>
+<body epub:type="cover" style="margin: 0; padding: 0;">
+  <div style="text-align: center;">
+    <img src="images/${coverFilename}" alt="Cover Image" style="max-width: 100%; max-height: 100vh;"/>
+  </div>
+</body>
+</html>`;
+      oebps.file('cover.xhtml', coverXhtml);
+      manifestItems.push('<item id="cover_page" href="cover.xhtml" media-type="application/xhtml+xml"/>');
+      coverSpineItem = '<itemref idref="cover_page" linear="yes"/>';
+    }
+
     if (this.options.mode === 'fixed') {
       for (let i = 0; i < this.pages.length; i++) {
         const p = this.pages[i];
@@ -143,6 +185,14 @@ rt { font-size: 0.5em; }`;
     }
 
     // 5. 目次 (nav.xhtml)
+    const navItemsList = [];
+    if (this.coverImage && this.coverImage.blob) {
+      navItemsList.push('<li><a href="cover.xhtml">表紙</a></li>');
+    }
+    spineItems.forEach((_, idx) => {
+      navItemsList.push(`<li><a href="${this.options.mode === 'fixed' ? 'p_' + String(idx + 1).padStart(4, '0') + '.xhtml' : this.pages[idx].filename}">ページ ${idx + 1}</a></li>`);
+    });
+
     const navContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ja">
@@ -154,14 +204,21 @@ rt { font-size: 0.5em; }`;
   <nav epub:type="toc" id="toc">
     <h1>目次</h1>
     <ol>
-      ${spineItems.map((_, idx) => `<li><a href="${this.options.mode === 'fixed' ? 'p_' + String(idx + 1).padStart(4, '0') + '.xhtml' : this.pages[idx].filename}">ページ ${idx + 1}</a></li>`).join('\n      ')}
+      ${navItemsList.join('\n      ')}
     </ol>
   </nav>
+  ${this.coverImage && this.coverImage.blob ? `<nav epub:type="landmarks" hidden="">
+    <h2>Landmarks</h2>
+    <ol>
+      <li><a epub:type="cover" href="cover.xhtml">表紙</a></li>
+    </ol>
+  </nav>` : ''}
 </body>
 </html>`;
     oebps.file('nav.xhtml', navContent);
 
     // 6. package.opf
+    const allSpineItems = coverSpineItem ? [coverSpineItem, ...spineItems] : spineItems;
     const opfContent = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" prefix="rendition: http://www.idpf.org/vocab/rendition/#">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -173,12 +230,13 @@ rt { font-size: 0.5em; }`;
     <meta property="rendition:layout">${this.options.mode === 'fixed' ? 'pre-paginated' : 'reflowable'}</meta>
     <meta property="rendition:orientation">auto</meta>
     <meta property="rendition:spread">auto</meta>
+    ${coverMetaTag}
   </metadata>
   <manifest>
     ${manifestItems.join('\n    ')}
   </manifest>
   <spine page-progression-direction="${this.metadata.direction}">
-    ${spineItems.join('\n    ')}
+    ${allSpineItems.join('\n    ')}
   </spine>
 </package>`;
     oebps.file('package.opf', opfContent);

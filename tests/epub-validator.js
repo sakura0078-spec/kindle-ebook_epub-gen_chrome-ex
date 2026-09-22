@@ -115,6 +115,11 @@ async function validateEpub(epubPathOrBuffer) {
         errors.push('固定レイアウトEPUBに画像ファイルが1枚も含まれていません');
       }
 
+      // 表紙画像 (Cover) の検証
+      const hasCoverProperty = opfXml.includes('properties="cover-image"');
+      const hasCoverMeta = opfXml.includes('<meta name="cover"');
+      info.hasCoverImage = hasCoverProperty && hasCoverMeta;
+
       // spine の検証
       if (!opfXml.includes('<spine')) {
         errors.push('OPF内に <spine> が存在しません');

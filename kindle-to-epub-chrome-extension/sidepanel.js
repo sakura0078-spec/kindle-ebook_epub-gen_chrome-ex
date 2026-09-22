@@ -38,8 +38,13 @@
   const chkShowOverlay = document.getElementById('chkShowOverlay');
   const settingRatioPreset = document.getElementById('settingRatioPreset');
   const frameScale = document.getElementById('frameScale');
-  const frameScaleVal = document.getElementById('frameScaleVal');
   const btnResetFrame = document.getElementById('btnResetFrame');
+  const btnReloadMetadata = document.getElementById('btnReloadMetadata');
+  const chkUseFirstPageAsCover = document.getElementById('chkUseFirstPageAsCover');
+  const inputCustomCover = document.getElementById('inputCustomCover');
+  const customCoverPreview = document.getElementById('customCoverPreview');
+  const btnClearCustomCover = document.getElementById('btnClearCustomCover');
+  let customCoverData = null; // { blob, mimeType }
 
   // IndexedDB初期化 (メモリクラッシュ防止)
   let db = null;
@@ -128,22 +133,50 @@
     if (currentPage > 0) completeScan();
   });
 
-  // 初期メタデータ自動取得 & キャプチャ枠の初期表示
-  async function initBookMetadata() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab && tab.id) {
-        chrome.tabs.sendMessage(tab.id, { action: 'GET_BOOK_INFO' }, (res) => {
-          if (!chrome.runtime.lastError && res && res.title) {
+  // カスタム表紙画像の指定イベント
+  inputCustomCover.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      customCoverData = {
+        blob: file,
+        mimeType: file.type || 'image/jpeg'
+      };
+      customCoverPreview.classList.remove('hidden');
+    }
+  });
+
+  btnClearCustomCover.addEventListener('click', () => {
+    customCoverData = null;
+    inputCustomCover.value = '';
+    customCoverPreview.classList.add('hidden');
+  });
+
+  // メタデータ手動再取得ボタン
+  btnReloadMetadata.addEventListener('click', async () => {
+    statusMessage.textContent = 'メタデータを再取得中...';
+    await initBookMetadata(true);
+    statusMessage.textContent = metaTitle.value ? `書籍メタデータを反映しました: "${metaTitle.value}"` : 'メタデータの取得に失敗しました';
+  });
+
+  // 初期メタデータ自動取得（非同期リトライ対応）
+  async function initBookMetadata(force = false) {
+    for (let retry = 0; retry < (force ? 3 : 5); retry++) {
+      try {
+        const tab = await getTargetKindleTab();
+        if (tab && tab.id) {
+          const res = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_BOOK_INFO' }, r));
+          if (!chrome.runtime.lastError && res && res.title && !res.isDefaultTitle) {
             metaTitle.value = res.title;
-            metaAuthor.value = res.author || '';
+            if (res.author) metaAuthor.value = res.author;
+            return;
           }
-        });
-      }
-    } catch (e) {}
+        }
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
   initBookMetadata();
-  setTimeout(() => updateCropOverlay(false), 500);
+  // 起動時は枠をオフのまま待機（ユーザーがチェックを入れた時のみ表示）
 
   async function startScan() {
     // スキャン開始時にもメタデータを再確認（ページ遷移完了後に取得できる場合があるため）
@@ -362,6 +395,14 @@
         statusMessage.textContent = '保存対象のページがありません';
         resetUI();
         return;
+      }
+
+      // 表紙画像（Kindle本棚対応）の設定
+      if (customCoverData && customCoverData.blob) {
+        builder.setCoverImage(customCoverData.blob, customCoverData.mimeType);
+      } else if (chkUseFirstPageAsCover.checked && pages.length > 0) {
+        const firstPageBlob = await (await fetch(pages[0].dataUrl)).blob();
+        builder.setCoverImage(firstPageBlob, settingFormat.value);
       }
 
       for (const p of pages) {
