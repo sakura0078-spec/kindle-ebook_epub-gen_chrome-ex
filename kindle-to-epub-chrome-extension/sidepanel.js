@@ -252,72 +252,76 @@
     const mode = settingMode.value;
     if (mode === 'fixed') {
       // 枠線の映り込み防止: 撮影の瞬間だけ画面上の枠を非表示にする
-      chrome.tabs.sendMessage(tab.id, { action: 'HIDE_OVERLAY_FOR_CAPTURE' }, () => {
+      await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'HIDE_OVERLAY_FOR_CAPTURE' }, r));
+
+      const res = await new Promise(r => {
         chrome.runtime.sendMessage({
           type: 'CAPTURE_VISIBLE_TAB',
           format: settingFormat.value === 'image/png' ? 'png' : 'jpeg',
           quality: parseInt(settingQuality.value, 10),
           windowId: tab.windowId
-        }, async (res) => {
-          // 撮影完了後、直ちに枠の表示状態を元に戻す
-          chrome.tabs.sendMessage(tab.id, { action: 'RESTORE_OVERLAY' }, () => {});
-
-          if (!res || !res.success || !res.dataUrl) {
-            console.error("[Sidepanel] Capture failed:", res?.error);
-            pauseScan();
-            warningAlert.textContent = '画面キャプチャに失敗しました: ' + (res?.error || '不明なエラー');
-            warningAlert.classList.remove('hidden');
-            return;
-          }
-
-          clearTimeout(timeoutTimer);
-          warningAlert.classList.add('hidden');
-
-          // 指定機種比率のキャプチャ枠に合わせてクロップ（isCapture: true で枠線インセット適用）
-          chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false), isCapture: true }, async (cropArea) => {
-            const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
-
-          // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
-          const sample = finalDataUrl.substring(finalDataUrl.length - 200);
-          if (lastCapturedSample && sample === lastCapturedSample) {
-            duplicateCount++;
-            if (duplicateCount >= 2) {
-              statusMessage.textContent = '最終ページを検知しました。EPUB生成を開始します...';
-              completeScan();
-              return;
-            }
-          } else {
-            duplicateCount = 0;
-            lastCapturedSample = sample;
-          }
-
-          // サムネイル更新
-          thumbBox.innerHTML = `<img src="${finalDataUrl}" alt="P${currentPage}"/>`;
-
-          // IndexedDBへ一時保存
-          savePageToDB(currentPage, finalDataUrl);
-
-          // Kindle側の進捗ステータス確認
-          chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_STATUS' }, (status) => {
-            const isLast = status && status.isLastPage;
-
-            // 最大ページ数到達チェック
-            if (maxPages && currentPage >= maxPages) {
-              completeScan();
-              return;
-            }
-
-            if (isLast) {
-              statusMessage.textContent = '書籍の末尾に到達しました。EPUBを作成します...';
-              completeScan();
-              return;
-            }
-
-            // 次ページへめくり
-            advancePage(tab.id);
-          });
-        });
+        }, r);
       });
+
+      // 撮影完了後、直ちに枠の表示状態を元に戻す
+      chrome.tabs.sendMessage(tab.id, { action: 'RESTORE_OVERLAY' }, () => {});
+
+      if (!res || !res.success || !res.dataUrl) {
+        console.error("[Sidepanel] Capture failed:", res?.error);
+        pauseScan();
+        warningAlert.textContent = '画面キャプチャに失敗しました: ' + (res?.error || '不明なエラー');
+        warningAlert.classList.remove('hidden');
+        return;
+      }
+
+      clearTimeout(timeoutTimer);
+      warningAlert.classList.add('hidden');
+
+      // 指定機種比率のキャプチャ枠に合わせてクロップ（isCapture: true で枠線インセット適用）
+      const cropArea = await new Promise(r => {
+        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false), isCapture: true }, r);
+      });
+
+      const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+
+      // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
+      const sample = finalDataUrl.substring(finalDataUrl.length - 200);
+      if (lastCapturedSample && sample === lastCapturedSample) {
+        duplicateCount++;
+        if (duplicateCount >= 2) {
+          statusMessage.textContent = '最終ページを検知しました。EPUB生成を開始します...';
+          completeScan();
+          return;
+        }
+      } else {
+        duplicateCount = 0;
+        lastCapturedSample = sample;
+      }
+
+      // サムネイル更新
+      thumbBox.innerHTML = `<img src="${finalDataUrl}" alt="P${currentPage}"/>`;
+
+      // IndexedDBへ一時保存
+      savePageToDB(currentPage, finalDataUrl);
+
+      // Kindle側の進捗ステータス確認
+      const status = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_STATUS' }, r));
+      const isLast = status && status.isLastPage;
+
+      // 最大ページ数到達チェック
+      if (maxPages && currentPage >= maxPages) {
+        completeScan();
+        return;
+      }
+
+      if (isLast) {
+        statusMessage.textContent = '書籍の末尾に到達しました。EPUBを作成します...';
+        completeScan();
+        return;
+      }
+
+      // 次ページへめくり
+      advancePage(tab.id);
     }
   }
 
