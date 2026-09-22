@@ -52,6 +52,14 @@
   };
   dbReq.onsuccess = (e) => { db = e.target.result; };
 
+  // コンテントスクリプトからのリアルタイム連動（画面枠直接ドラッグリサイズ時）
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'FRAME_SCALE_CHANGED' && typeof msg.scale === 'number') {
+      frameScale.value = msg.scale;
+      frameScaleVal.textContent = msg.scale + '%';
+    }
+  });
+
   // イベントリスナー
   settingQuality.addEventListener('input', (e) => {
     qualityVal.textContent = e.target.value + '%';
@@ -86,16 +94,29 @@
     };
   }
 
-  function updateCropOverlay(resetPosition = false) {
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-      if (tab && tab.id) {
-        chrome.tabs.sendMessage(tab.id, {
-          action: 'TOGGLE_CROP_OVERLAY',
-          show: chkShowOverlay.checked,
-          config: getFrameConfig(resetPosition)
-        }, () => { if (chrome.runtime.lastError) {} });
-      }
-    });
+  async function getTargetKindleTab() {
+    // 1. まず現在のアクティブタブを確認
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab && activeTab.url && activeTab.url.includes('read.amazon')) {
+      return activeTab;
+    }
+    // 2. 開いているすべてのKindleタブから探索
+    const kindleTabs = await chrome.tabs.query({ url: '*://read.amazon.*/*' });
+    if (kindleTabs && kindleTabs.length > 0) {
+      return kindleTabs[0];
+    }
+    return activeTab || null;
+  }
+
+  async function updateCropOverlay(resetPosition = false) {
+    const tab = await getTargetKindleTab();
+    if (tab && tab.id) {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'TOGGLE_CROP_OVERLAY',
+        show: chkShowOverlay.checked,
+        config: getFrameConfig(resetPosition)
+      }, () => { if (chrome.runtime.lastError) {} });
+    }
   }
 
   btnStart.addEventListener('click', startScan);
@@ -107,7 +128,7 @@
     if (currentPage > 0) completeScan();
   });
 
-  // 初期メタデータ自動取得
+  // 初期メタデータ自動取得 & キャプチャ枠の初期表示
   async function initBookMetadata() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -122,6 +143,7 @@
     } catch (e) {}
   }
   initBookMetadata();
+  setTimeout(() => updateCropOverlay(false), 500);
 
   async function startScan() {
     // スキャン開始時にもメタデータを再確認（ページ遷移完了後に取得できる場合があるため）

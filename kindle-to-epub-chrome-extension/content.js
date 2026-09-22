@@ -15,7 +15,9 @@
         sendResponse(calculateRatioFrame(req.config));
         break;
       case 'TOGGLE_CROP_OVERLAY':
-        toggleCropOverlay(req.show, req.config);
+        if (window === window.top) {
+          toggleCropOverlay(req.show, req.config);
+        }
         sendResponse({ success: true });
         break;
       case 'NEXT_PAGE':
@@ -122,7 +124,7 @@
       overlayElement = document.createElement('div');
       overlayElement.id = 'kindle-epub-crop-overlay';
       overlayElement.style.position = 'fixed';
-      overlayElement.style.pointerEvents = 'auto'; // ドラッグ可能にする
+      overlayElement.style.pointerEvents = 'auto';
       overlayElement.style.cursor = 'move';
       overlayElement.style.border = '3px solid #10b981';
       overlayElement.style.backgroundColor = 'rgba(16, 185, 129, 0.04)';
@@ -147,36 +149,99 @@
       label.style.pointerEvents = 'none';
       overlayElement.appendChild(label);
 
-      // ドラッグ移動の実装
-      let isDragging = false;
+      // 4隅のリサイズハンドルを作成（比率維持拡大縮小）
+      const handles = ['nw', 'ne', 'se', 'sw'];
+      handles.forEach(pos => {
+        const handle = document.createElement('div');
+        handle.className = `crop-resize-handle crop-handle-${pos}`;
+        handle.dataset.handle = pos;
+        handle.style.position = 'absolute';
+        handle.style.width = '14px';
+        handle.style.height = '14px';
+        handle.style.background = '#10b981';
+        handle.style.border = '2px solid #ffffff';
+        handle.style.borderRadius = '50%';
+        handle.style.zIndex = '1000000';
+        handle.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
+
+        if (pos.includes('n')) handle.style.top = '-7px';
+        if (pos.includes('s')) handle.style.bottom = '-7px';
+        if (pos.includes('w')) handle.style.left = '-7px';
+        if (pos.includes('e')) handle.style.right = '-7px';
+
+        handle.style.cursor = (pos === 'nw' || pos === 'se') ? 'nwse-resize' : 'nesw-resize';
+        overlayElement.appendChild(handle);
+      });
+
+      // 操作管理 (ドラッグ移動 / リサイズ)
+      let actionMode = null; // 'move' または 'resize'
+      let activeHandle = null;
       let startX = 0, startY = 0;
       let initOffsetX = 0, initOffsetY = 0;
+      let initScale = 85;
 
       overlayElement.addEventListener('mousedown', (e) => {
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        initOffsetX = currentFrameConfig.centerOffset.x;
-        initOffsetY = currentFrameConfig.centerOffset.y;
-        overlayElement.style.borderColor = '#059669';
-        e.preventDefault();
+        const handleTarget = e.target.closest('.crop-resize-handle');
+        if (handleTarget) {
+          actionMode = 'resize';
+          activeHandle = handleTarget.dataset.handle;
+          startX = e.clientX;
+          startY = e.clientY;
+          initScale = currentFrameConfig.scale || 85;
+          e.stopPropagation();
+          e.preventDefault();
+        } else {
+          actionMode = 'move';
+          startX = e.clientX;
+          startY = e.clientY;
+          initOffsetX = currentFrameConfig.centerOffset.x;
+          initOffsetY = currentFrameConfig.centerOffset.y;
+          overlayElement.style.borderColor = '#059669';
+          e.preventDefault();
+        }
       });
 
       window.addEventListener('mousemove', (e) => {
-        if (!isDragging || !overlayElement) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        currentFrameConfig.centerOffset.x = initOffsetX + dx;
-        currentFrameConfig.centerOffset.y = initOffsetY + dy;
+        if (!actionMode || !overlayElement) return;
 
-        const updatedArea = calculateRatioFrame(currentFrameConfig);
-        overlayElement.style.top = updatedArea.top + 'px';
-        overlayElement.style.left = updatedArea.left + 'px';
+        if (actionMode === 'move') {
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          currentFrameConfig.centerOffset.x = initOffsetX + dx;
+          currentFrameConfig.centerOffset.y = initOffsetY + dy;
+
+          const updatedArea = calculateRatioFrame(currentFrameConfig);
+          overlayElement.style.top = updatedArea.top + 'px';
+          overlayElement.style.left = updatedArea.left + 'px';
+        } else if (actionMode === 'resize') {
+          // リサイズハンドルのドラッグ：中心基準での拡大縮小率計算
+          const dy = e.clientY - startY;
+          // 下側ハンドルなら下ドラッグで拡大、上側なら上ドラッグで拡大
+          const factor = activeHandle.includes('s') ? dy : -dy;
+          const deltaScale = (factor / (window.innerHeight * 0.9)) * 100 * 1.5;
+          const newScale = Math.max(30, Math.min(100, Math.round(initScale + deltaScale)));
+
+          if (newScale !== currentFrameConfig.scale) {
+            currentFrameConfig.scale = newScale;
+            const updatedArea = calculateRatioFrame(currentFrameConfig);
+            overlayElement.style.top = updatedArea.top + 'px';
+            overlayElement.style.left = updatedArea.left + 'px';
+            overlayElement.style.width = updatedArea.width + 'px';
+            overlayElement.style.height = updatedArea.height + 'px';
+
+            // サイドパネル側のスライダー表示にもリアルタイム連動通知
+            chrome.runtime.sendMessage({
+              type: 'FRAME_SCALE_CHANGED',
+              scale: newScale
+            }).catch(() => {});
+          }
+        }
       });
 
       window.addEventListener('mouseup', () => {
-        if (isDragging && overlayElement) {
-          isDragging = false;
+        if (actionMode && overlayElement) {
+          actionMode = null;
+          activeHandle = null;
           overlayElement.style.borderColor = '#10b981';
         }
       });
@@ -187,7 +252,7 @@
     const labelElem = overlayElement.querySelector('#crop-overlay-label');
     if (labelElem) {
       const presetName = currentFrameConfig.preset === '20:9' ? 'A302ZT (20:9)' : currentFrameConfig.preset;
-      labelElem.textContent = `【キャプチャ枠: ${presetName}】※ドラッグで位置調整`;
+      labelElem.textContent = `【枠: ${presetName} (${currentFrameConfig.scale}%)】※四隅でサイズ伸縮・面で位置移動`;
     }
 
     overlayElement.style.top = area.top + 'px';
