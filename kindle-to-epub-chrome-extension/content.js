@@ -12,7 +12,7 @@
         sendResponse(checkSinglePageView());
         break;
       case 'DETECT_CROP_AREA':
-        sendResponse(calculateRatioFrame(req.config, req.isCapture));
+        sendResponse(getActualCropArea(req.config, req.isCapture));
         break;
       case 'HIDE_OVERLAY_FOR_CAPTURE':
         if (overlayElement) {
@@ -125,6 +125,38 @@
       windowHeight: window.innerHeight,
       dpr: window.devicePixelRatio || 1
     };
+  }
+
+  // 画面上に表示されているプレビュー枠(overlayElement)の実測座標を直接取得する関数
+  function getActualCropArea(config, isCapture = false) {
+    if (overlayElement && document.body.contains(overlayElement)) {
+      const rect = overlayElement.getBoundingClientRect();
+      let top = rect.top;
+      let left = rect.left;
+      let width = rect.width;
+      let height = rect.height;
+
+      // キャプチャ時：枠線（3px）の内側を切り抜く安全インセット
+      if (isCapture) {
+        const inset = 3;
+        top += inset;
+        left += inset;
+        width = Math.max(10, width - inset * 2);
+        height = Math.max(10, height - inset * 2);
+      }
+
+      return {
+        top: Math.round(top),
+        left: Math.round(left),
+        width: Math.round(width),
+        height: Math.round(height),
+        windowWidth: window.innerWidth,
+        windowHeight: window.innerHeight,
+        dpr: window.devicePixelRatio || 1
+      };
+    }
+    // 枠が非表示または未生成の場合は、設定から直接算出
+    return calculateRatioFrame(config, isCapture);
   }
 
   function toggleCropOverlay(show, config) {
