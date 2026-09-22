@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Test profiles & Chrome runtime data
+test-chrome-profile/
+temp-*-profile/
+
+# Test output artifacts & screenshots
+tests/*.epub
+tests/*.png
+output_test.epub
+
+# Temporary inspection/debug scripts
+inspect-*.js
+test-*.js
+open-browser.js
+kill-test-chrome.js
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store

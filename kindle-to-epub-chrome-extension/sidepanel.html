@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kindle to EPUB</title>
+  <link rel="stylesheet" href="sidepanel.css">
+  <script src="libs/jszip.min.js"></script>
+  <script src="epub-builder.js"></script>
+</head>
+<body>
+  <div class="panel-container">
+    <header class="panel-header">
+      <div class="header-title">
+        <span class="icon">📖</span>
+        <h1>Kindle to EPUB</h1>
+      </div>
+      <div id="viewModeNotice" class="badge-notice hidden">単一ページ推奨</div>
+    </header>
+
+    <!-- 書籍情報 (自動取得 + 失敗時手動入力) -->
+    <section class="section-card">
+      <h2 class="section-title">書籍メタデータ</h2>
+      <div class="meta-field">
+        <label>タイトル</label>
+        <input type="text" id="metaTitle" placeholder="書籍タイトルを自動取得中...">
+      </div>
+      <div class="meta-field">
+        <label>著者名</label>
+        <input type="text" id="metaAuthor" placeholder="著者名を自動取得中...">
+      </div>
+    </section>
+
+    <!-- スキャン設定 -->
+    <section class="section-card">
+      <h2 class="section-title">スキャン & EPUB設定</h2>
+      <div class="setting-row">
+        <label>出力モード</label>
+        <select id="settingMode">
+          <option value="fixed" selected>固定レイアウト (画像EPUB)</option>
+          <option value="reflow">リフロー (テキスト・ルビ抽出)</option>
+        </select>
+      </div>
+
+      <div class="setting-row" id="formatRow">
+        <label>画像形式</label>
+        <select id="settingFormat">
+          <option value="image/jpeg" selected>JPEG (軽量・高画質)</option>
+          <option value="image/png">PNG (劣化なし線画)</option>
+          <option value="image/webp">WebP (最新高圧縮)</option>
+        </select>
+      </div>
+
+      <div class="setting-row" id="qualityRow">
+        <label>画質: <span id="qualityVal">85%</span></label>
+        <input type="range" id="settingQuality" min="70" max="100" value="85">
+      </div>
+
+      <div class="setting-row">
+        <label>綴じ方向</label>
+        <select id="settingDirection">
+          <option value="auto" selected>自動判定</option>
+          <option value="rtl">右開き (縦書き・コミック)</option>
+          <option value="ltr">左開き (横書き・洋書)</option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <label>最大ページ数</label>
+        <input type="number" id="settingMaxPages" min="1" max="2000" placeholder="空欄で自動終了検知" style="width: 140px;">
+      </div>
+
+      <div class="setting-row">
+        <label>めくり待機</label>
+        <div class="interval-controls">
+          <label class="checkbox-label">
+            <input type="checkbox" id="autoInterval" checked> 自動検知
+          </label>
+          <div id="manualIntervalWrap" class="hidden">
+            <input type="number" id="fixedInterval" min="500" max="10000" step="100" value="1500"> ms
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- スキャン領域設定 (自動検知 ＋ 視覚的プレビュー枠 ＋ 手動微調整) -->
+    <section class="section-card">
+      <div class="section-header-flex">
+        <h2 class="section-title">スキャン領域 (自動検知＆微調整)</h2>
+        <button id="btnDetectArea" class="btn-link">再検知</button>
+      </div>
+
+      <div class="setting-row">
+        <label class="checkbox-label font-medium">
+          <input type="checkbox" id="chkShowOverlay" checked>
+          <span>Kindle画面にプレビュー枠を表示</span>
+        </label>
+      </div>
+
+      <div class="crop-adjust-box">
+        <span class="crop-adjust-title">トリミング余白の微調整 (px)</span>
+        <div class="crop-grid">
+          <div class="crop-input-item">
+            <label>上 (Top)</label>
+            <input type="number" id="cropTop" value="0" step="2">
+          </div>
+          <div class="crop-input-item">
+            <label>下 (Bottom)</label>
+            <input type="number" id="cropBottom" value="0" step="2">
+          </div>
+          <div class="crop-input-item">
+            <label>左 (Left)</label>
+            <input type="number" id="cropLeft" value="0" step="2">
+          </div>
+          <div class="crop-input-item">
+            <label>右 (Right)</label>
+            <input type="number" id="cropRight" value="0" step="2">
+          </div>
+        </div>
+        <p class="crop-note">※ ヘッダーや外枠黒帯を除去し、書籍の本文・イラストのみを切り抜いて保存します</p>
+      </div>
+    </section>
+
+    <!-- 進捗・リアルタイムプレビュー -->
+    <section class="section-card">
+      <h2 class="section-title">スキャン進捗</h2>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="pageCount">0 ページスキャン済み</span>
+        <span id="timeRemaining">残り: --:--</span>
+      </div>
+
+      <div class="thumbnail-preview-container">
+        <p class="preview-label">最新キャプチャ画面</p>
+        <div class="thumbnail-box" id="thumbBox">
+          <span class="thumb-placeholder">スキャン待機中</span>
+        </div>
+      </div>
+
+      <div class="status-badge" id="statusMessage">待機中 (Kindleを開いて開始)</div>
+      <div id="warningAlert" class="alert-box hidden"></div>
+    </section>
+
+    <!-- 操作ボタン -->
+    <footer class="action-footer">
+      <div class="btn-group-main">
+        <button id="btnStart" class="btn btn-primary">スキャン開始 (1冊全体)</button>
+        <button id="btnPause" class="btn btn-secondary hidden">一時停止</button>
+        <button id="btnResume" class="btn btn-primary hidden">再開</button>
+      </div>
+      <div class="btn-group-sub hidden" id="subActions">
+        <button id="btnCompleteNow" class="btn btn-secondary" title="現在までのページでEPUBを作成して終了">ここで完了＆EPUB作成</button>
+        <button id="btnRetryPage" class="btn btn-ghost" title="直前のページを再スキャン">撮り直し</button>
+        <button id="btnAbort" class="btn btn-danger" title="処理を中止">中止</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

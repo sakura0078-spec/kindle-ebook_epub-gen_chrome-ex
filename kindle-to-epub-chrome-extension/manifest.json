@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Kindle to EPUB Converter (Side Panel)",
+  "version": "1.0.0",
+  "description": "Web版Kindle Viewerから自動ページめくりでスキャンし、高品質EPUBファイルを作成するサイドパネル拡張機能",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "tabs",
+    "downloads",
+    "notifications",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://read.amazon.co.jp/*",
+    "https://read.amazon.com/*",
+    "https://read.amazon.co.uk/*",
+    "https://read.amazon.de/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "<all_urls>"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://read.amazon.co.jp/*",
+        "https://read.amazon.com/*",
+        "https://read.amazon.co.uk/*",
+        "https://read.amazon.de/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "Kindle to EPUB を開く",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

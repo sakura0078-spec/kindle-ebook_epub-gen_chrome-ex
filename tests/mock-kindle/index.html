@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>坊っちゃん - Kindle Cloud Reader (Mock)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background-color: #1a1a1a; color: #fff; font-family: sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+    
+    /* ヘッダーバー */
+    #header-bar {
+      height: 48px;
+      background-color: #232f3e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 10;
+      border-bottom: 1px solid #374151;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    #header-title { font-size: 14px; font-weight: bold; }
+    #header-author { font-size: 12px; color: #9ca3af; }
+    .header-controls { display: flex; gap: 8px; }
+    .btn-icon { background: #374151; border: none; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+
+    /* メインビューワー */
+    #viewer-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background-color: #121212;
+    }
+
+    /* 書籍キャンバス（単一ページ） */
+    #kindleReader_container {
+      position: relative;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+    }
+    #kindleReader_canvas {
+      background-color: #fdfbf7;
+      display: block;
+    }
+
+    /* クリックめくり領域 */
+    .turn-area {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 15%;
+      cursor: pointer;
+      z-index: 5;
+    }
+    .turn-left { left: 0; }
+    .turn-right { right: 0; }
+
+    /* フッター・プログレスバー */
+    #footer-bar {
+      height: 36px;
+      background-color: #232f3e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 11px;
+      color: #9ca3af;
+      border-top: 1px solid #374151;
+    }
+    .progress-track {
+      flex: 1;
+      height: 4px;
+      background: #374151;
+      margin: 0 16px;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #f59e0b;
+      width: 5%;
+      transition: width 0.2s ease;
+    }
+
+    /* ロード中スピナー（アニメーション） */
+    #loadingSpinner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+      z-index: 20;
+    }
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="header-bar">
+    <div class="header-left">
+      <div id="header-title">坊っちゃん (テスト書籍)</div>
+      <div id="header-author">夏目漱石</div>
+    </div>
+    <div class="header-controls">
+      <button class="btn-icon" id="btnSinglePage">単一ページ表示</button>
+    </div>
+  </div>
+
+  <div id="viewer-container">
+    <div class="turn-area turn-left" id="btnLeft" title="前/次へ"></div>
+    <div id="kindleReader_container">
+      <canvas id="kindleReader_canvas" width="600" height="900"></canvas>
+      <div id="loadingSpinner" class="spinner"></div>
+    </div>
+    <div class="turn-area turn-right" id="btnRight" title="前/次へ"></div>
+  </div>
+
+  <div id="footer-bar">
+    <span id="pageText">位置: 1 / 10 (10%)</span>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width: 10%;"></div>
+    </div>
+    <span id="readingTime">残り読書時間: 15分</span>
+  </div>
+
+  <script>
+    // モックKindleのロジック
+    const TOTAL_PAGES = 10;
+    let currentPage = 1;
+    const canvas = document.getElementById('kindleReader_canvas');
+    const ctx = canvas.getContext('2d');
+    const spinner = document.getElementById('loadingSpinner');
+    const pageText = document.getElementById('pageText');
+    const progressFill = document.getElementById('progressFill');
+
+    // サンプルテキスト
+    const sampleTexts = [
+      "【表紙】\n坊っちゃん\n夏目漱石 著",
+      "親譲りの無鉄砲で小供の時から損ばかりしている。",
+      "小学校に居る時分学校の二階から飛び降りて一週間ほど腰を抜かした事がある。",
+      "なぜそんな無闇をしたと聞く人があるかも知れぬ。別段深い理由でもない。",
+      "新築の二階から首を出していたら、同級生の一人が冗談に、いくら威張っても、そこから飛び降りる事は出来まい。弱虫やーいと囃したからである。",
+      "小使に負ぶさって帰って来た時、おやじが大きな眼をして二階ぐらいから飛び降りて腰を抜かす奴があるかと云ったから、この次は抜かさずに飛んで見せますと答えた。",
+      "親類のものから西洋製のナイフを貰って、奇麗な刃を日に翳して、友達に見せていたら、一人が光る事は光るが切れそうもないと云った。",
+      "切れぬ事があるか、何でも切ってみせると受け合った。そんなら君の指を切ってみろと注文したから、何だ指ぐらいこの通りだと右の手の親指の甲をはすに切り込んだ。",
+      "幸いナイフが鈍かったのと、親指の骨が硬かったので、今でもそこにはっきりと傷痕が残っている。",
+      "【奥付】\n坊っちゃん\n全編読了\nご愛読ありがとうございました。"
+    ];
+
+    function renderPage(pageNum) {
+      spinner.style.display = 'block';
+      setTimeout(() => {
+        spinner.style.display = 'none';
+        
+        // 描画
+        ctx.fillStyle = '#fdfbf7';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 外枠
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+        // 本文（縦書き風にレイアウト）
+        ctx.fillStyle = '#1f2937';
+        ctx.font = '22px serif';
+        ctx.textAlign = 'left';
+        
+        const text = sampleTexts[pageNum - 1] || `第 ${pageNum} ページの本文`;
+        const lines = text.split('\n');
+        
+        let startY = 100;
+        for (const line of lines) {
+          ctx.fillText(line, 60, startY);
+          startY += 40;
+        }
+
+        // ページ番号
+        ctx.fillStyle = '#9ca3af';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`- ${pageNum} -`, canvas.width / 2, canvas.height - 30);
+
+        // プログレス更新
+        const pct = Math.round((pageNum / TOTAL_PAGES) * 100);
+        pageText.textContent = `位置: ${pageNum} / ${TOTAL_PAGES} (${pct}%)`;
+        progressFill.style.width = `${pct}%`;
+      }, 150); // 150ms 描画遅延シミュレート
+    }
+
+    function nextPage() {
+      if (currentPage < TOTAL_PAGES) {
+        currentPage++;
+        renderPage(currentPage);
+        return true;
+      }
+      return false; // 最終ページ到達
+    }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        renderPage(currentPage);
+        return true;
+      }
+      return false;
+    }
+
+    // キーボードイベント処理 (右開き縦書きの場合: ArrowLeftで次ページ)
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') {
+        nextPage();
+      } else if (e.key === 'ArrowRight') {
+        prevPage();
+      }
+    });
+
+    // クリック領域
+    document.getElementById('btnLeft').addEventListener('click', nextPage);
+    document.getElementById('btnRight').addEventListener('click', prevPage);
+
+    // 初期ページ描画
+    renderPage(currentPage);
+  </script>
+</body>
+</html>

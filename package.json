@@ -1,0 +1,16 @@
+{
+  "name": "kindle-to-epub-harness",
+  "version": "1.0.0",
+  "description": "Kindle to EPUB Chrome Extension & Test Harness",
+  "scripts": {
+    "test": "node tests/test-epub-builder.js && node tests/run-extension-test.js",
+    "test:unit": "node tests/test-epub-builder.js",
+    "test:e2e": "node tests/run-extension-test.js",
+    "test:live": "node tests/run-live-test.js 3",
+    "mock:server": "node tests/mock-server.js"
+  },
+  "devDependencies": {
+    "jszip": "^3.10.1",
+    "puppeteer-core": "^24.4.0"
+  }
+}
