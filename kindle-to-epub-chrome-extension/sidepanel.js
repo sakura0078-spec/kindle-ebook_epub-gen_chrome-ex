@@ -397,19 +397,23 @@
     loopNextStep();
   }
 
+  function getImageSignature(dataUrl) {
+    if (!dataUrl) return '';
+    const len = dataUrl.length;
+    const mid = Math.floor(len / 2);
+    return `${len}:${dataUrl.slice(30, 150)}:${dataUrl.slice(mid, mid + 120)}:${dataUrl.slice(-120)}`;
+  }
+
   async function loopNextStep() {
     if (!isScanning || isPaused) return;
 
-    currentPage++;
-    updateProgressUI();
-
-    // タイムアウト監視 (12秒無反応で一時停止)
+    // タイムアウト監視 (15秒無反応で一時停止)
     clearTimeout(timeoutTimer);
     timeoutTimer = setTimeout(() => {
       pauseScan();
       warningAlert.textContent = 'ページの読み込みがタイムアウトしました。Kindle画面を確認し、再開ボタンを押してください。';
       warningAlert.classList.remove('hidden');
-    }, 12000);
+    }, 15000);
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) {
@@ -454,19 +458,31 @@
       const cropRes = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
       const finalDataUrl = cropRes.dataUrl;
 
-      // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
-      const sample = finalDataUrl.substring(finalDataUrl.length - 200);
-      if (lastCapturedSample && sample === lastCapturedSample) {
+      // 画面変化の重複検知（めくっても変化しない判定）
+      const currentSignature = getImageSignature(finalDataUrl);
+      if (lastCapturedSample && currentSignature === lastCapturedSample) {
         duplicateCount++;
-        if (duplicateCount >= 2) {
-          statusMessage.textContent = '最終ページを検知しました。EPUB生成を開始します...';
-          completeScan();
+        console.log(`[Sidepanel] 重複画面を検知 (${duplicateCount}/3)`);
+
+        // 最大3回までは即座に終了せず、めくり動作を再試行（通信遅延や描画遅延のリカバリー）
+        if (duplicateCount <= 3) {
+          statusMessage.textContent = `ページ遷移を確認中... (再試行 ${duplicateCount}/3)`;
+          advancePage(tab.id, true);
           return;
         }
-      } else {
-        duplicateCount = 0;
-        lastCapturedSample = sample;
+
+        // 3回リトライしても画面が一切変化しない場合＝本当に書籍の終端
+        statusMessage.textContent = '最終ページに到達しました。EPUBを生成します...';
+        completeScan();
+        return;
       }
+
+      // 新しいページが撮影できた場合
+      duplicateCount = 0;
+      lastCapturedSample = currentSignature;
+
+      currentPage++;
+      updateProgressUI();
 
       // サムネイル更新
       thumbBox.innerHTML = `<img src="${finalDataUrl}" alt="P${currentPage}"/>`;
@@ -474,24 +490,23 @@
       // IndexedDBへ一時保存（寸法付き）
       savePageToDB(currentPage, finalDataUrl, cropRes.width, cropRes.height);
 
-      // Kindle側の進捗ステータス確認
-      const status = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_STATUS' }, r));
-      const isLast = status && status.isLastPage;
-
       // 最大ページ数到達チェック
       if (maxPages && currentPage >= maxPages) {
+        statusMessage.textContent = `指定の最大ページ数 (${maxPages}) に到達しました。EPUBを作成します...`;
         completeScan();
         return;
       }
 
-      if (isLast) {
+      // Kindle側の進捗ステータス確認
+      const status = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_STATUS' }, r));
+      if (status && status.isLastPage && status.isNextDisabled) {
         statusMessage.textContent = '書籍の末尾に到達しました。EPUBを作成します...';
         completeScan();
         return;
       }
 
       // 次ページへめくり
-      advancePage(tab.id);
+      advancePage(tab.id, false);
     }
   }
 
@@ -522,11 +537,14 @@
     });
   }
 
-  function advancePage(tabId) {
+  function advancePage(tabId, isRetry = false) {
     chrome.tabs.sendMessage(tabId, { action: 'NEXT_PAGE', direction: settingDirection.value }, (res) => {
       // 描画待機＆ロードインジケーター確認
       chrome.tabs.sendMessage(tabId, { action: 'CHECK_RENDER_COMPLETE' }, () => {
-        const waitTime = parseInt(settingInterval.value, 10) || 900;
+        let waitTime = parseInt(settingInterval.value, 10) || 900;
+        if (isRetry) {
+          waitTime += 600; // リトライ時は描画遅延に配慮して待機時間を延長
+        }
         scanTimer = setTimeout(() => {
           loopNextStep();
         }, waitTime);

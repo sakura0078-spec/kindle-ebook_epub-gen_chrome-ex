@@ -744,7 +744,17 @@
     // ページ番号やプログレス情報を取得して最終判定に活用
     let progressPct = 0;
     let isLastPage = false;
+    let isNextDisabled = false;
     let statusText = '';
+
+    // 次のページボタンの物理的な無効化状態（最も確実な終了シグナル）
+    const nextBtn = findElementAcrossFrames('button#kr-chevron-right, button[aria-label="次のページ"]');
+    if (nextBtn) {
+      if (nextBtn.disabled || nextBtn.getAttribute('aria-disabled') === 'true' || nextBtn.classList.contains('disabled')) {
+        isNextDisabled = true;
+        isLastPage = true;
+      }
+    }
 
     const pageElem = findElementAcrossFrames('#pageText, .progress-text, [aria-label*="進捗"], .footer-progress');
     if (pageElem && pageElem.textContent) {
@@ -761,13 +771,7 @@
       }
     }
 
-    const progressFill = findElementAcrossFrames('#progressFill, .progress-fill, .slider-progress');
-    if (progressFill && progressFill.style.width) {
-      const w = parseInt(progressFill.style.width, 10);
-      if (w >= 100) isLastPage = true;
-    }
-
-    return { progressPct, isLastPage, statusText };
+    return { progressPct, isLastPage, isNextDisabled, statusText };
   }
 
   async function turnNextPage(direction = 'rtl') {
