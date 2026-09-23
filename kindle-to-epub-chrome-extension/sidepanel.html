@@ -59,10 +59,8 @@
       <h2 class="section-title">スキャン & EPUB設定</h2>
       <div class="setting-row">
         <label>出力モード</label>
-        <select id="settingMode">
-          <option value="fixed" selected>固定レイアウト (画像EPUB)</option>
-          <option value="reflow">リフロー (テキスト・ルビ抽出)</option>
-        </select>
+        <span style="font-size: 12px; font-weight: 600; color: #1e293b;">固定レイアウト (画像EPUB)</span>
+        <input type="hidden" id="settingMode" value="fixed">
       </div>
 
       <div class="setting-row" id="formatRow">
@@ -127,6 +125,7 @@
           <option value="20:9" selected>★ A302ZT / 縦長スマホ (20:9)</option>
           <option value="19.5:9">iPhone / 標準スマホ (19.5:9)</option>
           <option value="16:9">汎用ブック / タブレット (16:9)</option>
+          <option value="free">📐 自由変形 (比率固定なし / 雑誌・固定書籍)</option>
         </select>
       </div>
 
@@ -137,7 +136,7 @@
         </label>
       </div>
 
-      <div class="crop-adjust-box">
+      <div class="crop-adjust-box" id="scaleAdjustBox">
         <span class="crop-adjust-title">枠のサイズ調整（比率維持）</span>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
           <input type="range" id="frameScale" min="30" max="150" value="85" style="flex: 1;">
@@ -146,6 +145,13 @@
         <p class="crop-note" style="margin-top: 8px;">
           ※ 枠面をドラッグで<strong>位置移動</strong>、枠の四隅の丸ハンドルをドラッグで<strong>直感的にサイズ伸縮</strong>できます。<br>
           ※ Kindleの「Aa」ボタンで文字サイズや行間を調整し、枠内に綺麗に収めてからスキャンを開始してください。
+        </p>
+      </div>
+
+      <div class="crop-adjust-box hidden" id="freeAdjustBox">
+        <span class="crop-adjust-title" style="color: #2563eb;">自由変形モード有効中</span>
+        <p class="crop-note" style="margin-top: 6px;">
+          ※ 比率の固定はありません。画面上の枠の<strong>四隅の丸ハンドルをドラッグして縦横自由に伸縮</strong>し、枠面をドラッグして位置を合わせてください。
         </p>
       </div>
     </section>

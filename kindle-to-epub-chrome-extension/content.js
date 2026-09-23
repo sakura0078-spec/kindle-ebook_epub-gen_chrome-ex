@@ -101,8 +101,9 @@
   // 機種別比率キャプチャ枠の状態管理
   let currentFrameConfig = {
     preset: '20:9',
-    scale: 0.85,
-    centerOffset: { x: 0, y: 0 }
+    scale: 85,
+    centerOffset: { x: 0, y: 0 },
+    freeRect: null // 自由変形モード用の矩形 { top, left, width, height }
   };
 
   function parseRatio(preset) {
@@ -113,6 +114,44 @@
 
   function calculateRatioFrame(config, isCapture = false) {
     const cfg = config || currentFrameConfig;
+
+    // 自由変形モード（雑誌・固定レイアウト用）
+    if (cfg.preset === 'free') {
+      let top, left, width, height;
+      if (cfg.freeRect) {
+        top = cfg.freeRect.top;
+        left = cfg.freeRect.left;
+        width = cfg.freeRect.width;
+        height = cfg.freeRect.height;
+      } else {
+        const defHeight = Math.min(window.innerHeight - 60, Math.round(window.innerHeight * 0.85));
+        const defWidth = Math.min(window.innerWidth - 60, Math.round(defHeight * 0.7));
+        top = Math.round((window.innerHeight - defHeight) / 2);
+        left = Math.round((window.innerWidth - defWidth) / 2);
+        width = defWidth;
+        height = defHeight;
+        cfg.freeRect = { top, left, width, height };
+      }
+
+      if (isCapture) {
+        const inset = 3;
+        top += inset;
+        left += inset;
+        width = Math.max(10, width - inset * 2);
+        height = Math.max(10, height - inset * 2);
+      }
+
+      return {
+        top: Math.round(top),
+        left: Math.round(left),
+        width: Math.round(width),
+        height: Math.round(height),
+        windowWidth: window.innerWidth,
+        windowHeight: window.innerHeight,
+        dpr: window.devicePixelRatio || 1
+      };
+    }
+
     const ratioHtoW = parseRatio(cfg.preset); // height / width
     const scale = (cfg.scale || 85) / 100;
 
@@ -185,7 +224,10 @@
     if (config) {
       if (config.preset) currentFrameConfig.preset = config.preset;
       if (typeof config.scale === 'number') currentFrameConfig.scale = config.scale;
-      if (config.resetPosition) currentFrameConfig.centerOffset = { x: 0, y: 0 };
+      if (config.resetPosition) {
+        currentFrameConfig.centerOffset = { x: 0, y: 0 };
+        currentFrameConfig.freeRect = null;
+      }
     }
 
     if (!show) {
@@ -226,7 +268,7 @@
       label.style.pointerEvents = 'none';
       overlayElement.appendChild(label);
 
-      // 4隅のリサイズハンドルを作成（比率維持拡大縮小）
+      // 4隅のリサイズハンドルを作成
       const handles = ['nw', 'ne', 'se', 'sw'];
       handles.forEach(pos => {
         const handle = document.createElement('div');
@@ -256,21 +298,22 @@
       let startX = 0, startY = 0;
       let initOffsetX = 0, initOffsetY = 0;
       let initScale = 85;
+      let initRect = null;
 
       overlayElement.addEventListener('mousedown', (e) => {
         const handleTarget = e.target.closest('.crop-resize-handle');
+        initRect = overlayElement.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+
         if (handleTarget) {
           actionMode = 'resize';
           activeHandle = handleTarget.dataset.handle;
-          startX = e.clientX;
-          startY = e.clientY;
           initScale = currentFrameConfig.scale || 85;
           e.stopPropagation();
           e.preventDefault();
         } else {
           actionMode = 'move';
-          startX = e.clientX;
-          startY = e.clientY;
           initOffsetX = currentFrameConfig.centerOffset.x;
           initOffsetY = currentFrameConfig.centerOffset.y;
           overlayElement.style.borderColor = '#059669';
@@ -279,11 +322,68 @@
       });
 
       window.addEventListener('mousemove', (e) => {
-        if (!actionMode || !overlayElement) return;
+        if (!actionMode || !overlayElement || !initRect) return;
 
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        // 自由変形モード（比率固定なし）の場合
+        if (currentFrameConfig.preset === 'free') {
+          if (actionMode === 'move') {
+            const newLeft = Math.round(initRect.left + dx);
+            const newTop = Math.round(initRect.top + dy);
+            overlayElement.style.left = `${newLeft}px`;
+            overlayElement.style.top = `${newTop}px`;
+            currentFrameConfig.freeRect = {
+              left: newLeft,
+              top: newTop,
+              width: Math.round(initRect.width),
+              height: Math.round(initRect.height)
+            };
+          } else if (actionMode === 'resize') {
+            let newLeft = initRect.left;
+            let newTop = initRect.top;
+            let newWidth = initRect.width;
+            let newHeight = initRect.height;
+
+            if (activeHandle.includes('e')) {
+              newWidth = Math.max(50, initRect.width + dx);
+            }
+            if (activeHandle.includes('w')) {
+              const w = initRect.width - dx;
+              if (w >= 50) {
+                newLeft = initRect.left + dx;
+                newWidth = w;
+              }
+            }
+            if (activeHandle.includes('s')) {
+              newHeight = Math.max(50, initRect.height + dy);
+            }
+            if (activeHandle.includes('n')) {
+              const h = initRect.height - dy;
+              if (h >= 50) {
+                newTop = initRect.top + dy;
+                newHeight = h;
+              }
+            }
+
+            overlayElement.style.left = `${Math.round(newLeft)}px`;
+            overlayElement.style.top = `${Math.round(newTop)}px`;
+            overlayElement.style.width = `${Math.round(newWidth)}px`;
+            overlayElement.style.height = `${Math.round(newHeight)}px`;
+
+            currentFrameConfig.freeRect = {
+              left: Math.round(newLeft),
+              top: Math.round(newTop),
+              width: Math.round(newWidth),
+              height: Math.round(newHeight)
+            };
+          }
+          return;
+        }
+
+        // 比率固定モードの場合
         if (actionMode === 'move') {
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
           currentFrameConfig.centerOffset.x = initOffsetX + dx;
           currentFrameConfig.centerOffset.y = initOffsetY + dy;
 
@@ -291,9 +391,6 @@
           overlayElement.style.top = updatedArea.top + 'px';
           overlayElement.style.left = updatedArea.left + 'px';
         } else if (actionMode === 'resize') {
-          // リサイズハンドルのドラッグ：中心基準での拡大縮小率計算
-          const dy = e.clientY - startY;
-          // 下側ハンドルなら下ドラッグで拡大、上側なら上ドラッグで拡大
           const factor = activeHandle.includes('s') ? dy : -dy;
           const deltaScale = (factor / (window.innerHeight * 0.9)) * 100 * 1.5;
           const newScale = Math.max(30, Math.min(150, Math.round(initScale + deltaScale)));
@@ -306,7 +403,6 @@
             overlayElement.style.width = updatedArea.width + 'px';
             overlayElement.style.height = updatedArea.height + 'px';
 
-            // サイドパネル側のスライダー表示にもリアルタイム連動通知
             chrome.runtime.sendMessage({
               type: 'FRAME_SCALE_CHANGED',
               scale: newScale
@@ -319,6 +415,7 @@
         if (actionMode && overlayElement) {
           actionMode = null;
           activeHandle = null;
+          initRect = null;
           overlayElement.style.borderColor = '#10b981';
         }
       });
@@ -328,8 +425,12 @@
 
     const labelElem = overlayElement.querySelector('#crop-overlay-label');
     if (labelElem) {
-      const presetName = currentFrameConfig.preset === '20:9' ? 'A302ZT (20:9)' : currentFrameConfig.preset;
-      labelElem.textContent = `【枠: ${presetName} (${currentFrameConfig.scale}%)】※四隅でサイズ伸縮・面で位置移動`;
+      if (currentFrameConfig.preset === 'free') {
+        labelElem.textContent = '【本文枠: 自由変形】※四隅で自由リサイズ・面で位置移動';
+      } else {
+        const presetName = currentFrameConfig.preset === '20:9' ? 'A302ZT (20:9)' : currentFrameConfig.preset;
+        labelElem.textContent = `【本文枠: ${presetName} (${currentFrameConfig.scale}%)】※四隅でサイズ伸縮・面で位置移動`;
+      }
     }
 
     overlayElement.style.top = area.top + 'px';

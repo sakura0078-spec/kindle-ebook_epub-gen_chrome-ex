@@ -42,6 +42,8 @@
   const settingRatioPreset = document.getElementById('settingRatioPreset');
   const frameScale = document.getElementById('frameScale');
   const frameScaleVal = document.getElementById('frameScaleVal');
+  const scaleAdjustBox = document.getElementById('scaleAdjustBox');
+  const freeAdjustBox = document.getElementById('freeAdjustBox');
   const btnResetFrame = document.getElementById('btnResetFrame');
   const btnReloadMetadata = document.getElementById('btnReloadMetadata');
   const btnToggleCoverFrame = document.getElementById('btnToggleCoverFrame');
@@ -163,7 +165,19 @@
     updateCropOverlay(false);
   });
 
+  function updatePresetUI() {
+    const isFree = settingRatioPreset.value === 'free';
+    if (isFree) {
+      scaleAdjustBox.classList.add('hidden');
+      freeAdjustBox.classList.remove('hidden');
+    } else {
+      scaleAdjustBox.classList.remove('hidden');
+      freeAdjustBox.classList.add('hidden');
+    }
+  }
+
   settingRatioPreset.addEventListener('change', () => {
+    updatePresetUI();
     updateCropOverlay(true);
   });
 
