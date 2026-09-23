@@ -44,11 +44,14 @@
   const frameScaleVal = document.getElementById('frameScaleVal');
   const btnResetFrame = document.getElementById('btnResetFrame');
   const btnReloadMetadata = document.getElementById('btnReloadMetadata');
-  const chkUseFirstPageAsCover = document.getElementById('chkUseFirstPageAsCover');
-  const inputCustomCover = document.getElementById('inputCustomCover');
-  const customCoverPreview = document.getElementById('customCoverPreview');
-  const btnClearCustomCover = document.getElementById('btnClearCustomCover');
-  let customCoverData = null; // { blob, mimeType }
+  const btnToggleCoverFrame = document.getElementById('btnToggleCoverFrame');
+  const btnCaptureCover = document.getElementById('btnCaptureCover');
+  const coverPreviewContainer = document.getElementById('coverPreviewContainer');
+  const coverThumbnail = document.getElementById('coverThumbnail');
+  const coverSizeInfo = document.getElementById('coverSizeInfo');
+  const btnClearCover = document.getElementById('btnClearCover');
+  let isCoverOverlayVisible = false;
+  let customCoverData = null; // { blob, mimeType, dataUrl, width, height }
 
   // IndexedDB初期化 (メモリクラッシュ防止 + ディレクトリハンドル保存)
   let db = null;
@@ -214,22 +217,107 @@
     if (currentPage > 0) completeScan();
   });
 
-  // カスタム表紙画像の指定イベント
-  inputCustomCover.addEventListener('change', (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) {
+  // 表紙枠の表示/非表示トグル
+  btnToggleCoverFrame.addEventListener('click', async () => {
+    isCoverOverlayVisible = !isCoverOverlayVisible;
+    await updateCoverOverlay(isCoverOverlayVisible);
+  });
+
+  async function updateCoverOverlay(show) {
+    const tab = await getTargetKindleTab();
+    if (tab && tab.id) {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'TOGGLE_COVER_OVERLAY',
+        show: show
+      }, () => { if (chrome.runtime.lastError) {} });
+    }
+    if (show) {
+      btnToggleCoverFrame.textContent = '📐 表紙枠を非表示';
+      btnToggleCoverFrame.style.background = '#dbeafe';
+      btnToggleCoverFrame.style.borderColor = '#3b82f6';
+      btnToggleCoverFrame.style.color = '#1d4ed8';
+      btnCaptureCover.removeAttribute('disabled');
+      statusMessage.textContent = 'Kindle画面の青い枠を表紙に合わせて「表紙を撮影」を押してください';
+    } else {
+      btnToggleCoverFrame.textContent = '📐 表紙枠を表示';
+      btnToggleCoverFrame.style.background = '';
+      btnToggleCoverFrame.style.borderColor = '';
+      btnToggleCoverFrame.style.color = '';
+      btnCaptureCover.setAttribute('disabled', 'true');
+    }
+  }
+
+  // 表紙撮影ボタン（自由枠内をキャプチャして登録）
+  btnCaptureCover.addEventListener('click', async () => {
+    try {
+      const tab = await getTargetKindleTab();
+      if (!tab || !tab.id) {
+        statusMessage.textContent = 'Kindleタブが見つかりません';
+        return;
+      }
+
+      statusMessage.textContent = '表紙を撮影中...';
+
+      // 1. 枠線の映り込み防止のため一時非表示
+      await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'HIDE_COVER_OVERLAY_FOR_CAPTURE' }, r));
+
+      // 2. キャプチャ実行
+      const res = await new Promise(r => {
+        chrome.runtime.sendMessage({
+          type: 'CAPTURE_VISIBLE_TAB',
+          format: settingFormat.value === 'image/png' ? 'png' : 'jpeg',
+          quality: parseInt(settingQuality.value, 10),
+          windowId: tab.windowId
+        }, r);
+      });
+
+      // 3. 枠線の復元
+      chrome.tabs.sendMessage(tab.id, { action: 'RESTORE_COVER_OVERLAY' }, () => {});
+
+      if (!res || !res.success || !res.dataUrl) {
+        statusMessage.textContent = '表紙キャプチャに失敗しました: ' + (res?.error || '不明なエラー');
+        return;
+      }
+
+      // 4. 表紙枠の実測座標取得（インセット適用）
+      const cropArea = await new Promise(r => {
+        chrome.tabs.sendMessage(tab.id, { action: 'DETECT_COVER_CROP_AREA', isCapture: true }, r);
+      });
+
+      // 5. クロップ実行
+      const coverDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+      const coverBlob = await (await fetch(coverDataUrl)).blob();
+
       customCoverData = {
-        blob: file,
-        mimeType: file.type || 'image/jpeg'
+        blob: coverBlob,
+        mimeType: settingFormat.value,
+        dataUrl: coverDataUrl,
+        width: cropArea ? cropArea.width : 0,
+        height: cropArea ? cropArea.height : 0
       };
-      customCoverPreview.classList.remove('hidden');
+
+      // 6. UI更新 & 表紙枠を非表示にして終了
+      coverThumbnail.src = coverDataUrl;
+      coverSizeInfo.textContent = `${customCoverData.width} × ${customCoverData.height} px`;
+      coverPreviewContainer.classList.remove('hidden');
+
+      isCoverOverlayVisible = false;
+      await updateCoverOverlay(false);
+
+      statusMessage.textContent = '表紙画像を正常に撮影・登録しました！';
+    } catch (err) {
+      console.error('Cover capture error:', err);
+      statusMessage.textContent = '表紙撮影エラー: ' + err.message;
     }
   });
 
-  btnClearCustomCover.addEventListener('click', () => {
+  // 表紙画像解除
+  btnClearCover.addEventListener('click', () => {
     customCoverData = null;
-    inputCustomCover.value = '';
-    customCoverPreview.classList.add('hidden');
+    coverThumbnail.src = '';
+    coverSizeInfo.textContent = '';
+    coverPreviewContainer.classList.add('hidden');
+    statusMessage.textContent = '設定済み表紙画像を解除しました';
   });
 
   // メタデータ手動再取得ボタン
@@ -486,12 +574,9 @@
         return;
       }
 
-      // 表紙画像（Kindle本棚対応）の設定
+      // 表紙画像（Kindle本棚対応）の設定（専用枠で撮影された表紙画像を反映）
       if (customCoverData && customCoverData.blob) {
         builder.setCoverImage(customCoverData.blob, customCoverData.mimeType);
-      } else if (chkUseFirstPageAsCover.checked && pages.length > 0) {
-        const firstPageBlob = await (await fetch(pages[0].dataUrl)).blob();
-        builder.setCoverImage(firstPageBlob, settingFormat.value);
       }
 
       for (const p of pages) {

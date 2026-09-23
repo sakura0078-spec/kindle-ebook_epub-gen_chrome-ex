@@ -1,6 +1,7 @@
 // content.js - Kindle Viewer 自動制御 & データ抽出 & スキャン領域検知
 (() => {
   let overlayElement = null;
+  let coverOverlayElement = null;
 
   // メッセージ受信用
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -29,6 +30,27 @@
       case 'TOGGLE_CROP_OVERLAY':
         if (window === window.top) {
           toggleCropOverlay(req.show, req.config);
+        }
+        sendResponse({ success: true });
+        break;
+      case 'TOGGLE_COVER_OVERLAY':
+        if (window === window.top) {
+          toggleCoverOverlay(req.show);
+        }
+        sendResponse({ success: true });
+        break;
+      case 'DETECT_COVER_CROP_AREA':
+        sendResponse(getActualCoverCropArea(req.isCapture));
+        break;
+      case 'HIDE_COVER_OVERLAY_FOR_CAPTURE':
+        if (coverOverlayElement) {
+          coverOverlayElement.style.visibility = 'hidden';
+        }
+        sendResponse({ success: true });
+        break;
+      case 'RESTORE_COVER_OVERLAY':
+        if (coverOverlayElement) {
+          coverOverlayElement.style.visibility = 'visible';
         }
         sendResponse({ success: true });
         break;
@@ -314,6 +336,201 @@
     overlayElement.style.left = area.left + 'px';
     overlayElement.style.width = area.width + 'px';
     overlayElement.style.height = area.height + 'px';
+  }
+
+  // 表紙専用枠（自由ドラッグ・比率固定なし）の実測座標取得
+  function getActualCoverCropArea(isCapture = false) {
+    if (coverOverlayElement && document.body.contains(coverOverlayElement)) {
+      const rect = coverOverlayElement.getBoundingClientRect();
+      let top = rect.top;
+      let left = rect.left;
+      let width = rect.width;
+      let height = rect.height;
+
+      if (isCapture) {
+        const inset = 3;
+        top += inset;
+        left += inset;
+        width = Math.max(10, width - inset * 2);
+        height = Math.max(10, height - inset * 2);
+      }
+
+      return {
+        top: Math.round(top),
+        left: Math.round(left),
+        width: Math.round(width),
+        height: Math.round(height),
+        windowWidth: window.innerWidth,
+        windowHeight: window.innerHeight,
+        dpr: window.devicePixelRatio || 1
+      };
+    }
+    // 表紙枠が存在しない場合のデフォルト中央領域
+    const defHeight = Math.round(window.innerHeight * 0.8);
+    const defWidth = Math.round(defHeight * 0.7);
+    return {
+      top: Math.round((window.innerHeight - defHeight) / 2),
+      left: Math.round((window.innerWidth - defWidth) / 2),
+      width: defWidth,
+      height: defHeight,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
+      dpr: window.devicePixelRatio || 1
+    };
+  }
+
+  // 表紙専用枠の表示/非表示（自由変形・ドラッグ）
+  function toggleCoverOverlay(show) {
+    if (!show) {
+      if (coverOverlayElement) {
+        coverOverlayElement.remove();
+        coverOverlayElement = null;
+      }
+      return;
+    }
+
+    if (!coverOverlayElement) {
+      coverOverlayElement = document.createElement('div');
+      coverOverlayElement.id = 'kindle-epub-cover-overlay';
+      coverOverlayElement.style.position = 'fixed';
+      coverOverlayElement.style.pointerEvents = 'auto';
+      coverOverlayElement.style.cursor = 'move';
+      coverOverlayElement.style.border = '3px solid #2563eb';
+      coverOverlayElement.style.backgroundColor = 'rgba(37, 99, 235, 0.05)';
+      coverOverlayElement.style.boxShadow = '0 0 0 9999px rgba(0, 0, 0, 0.5)';
+      coverOverlayElement.style.zIndex = '999999';
+      coverOverlayElement.style.userSelect = 'none';
+      coverOverlayElement.style.boxSizing = 'border-box';
+
+      // 表紙枠ラベル
+      const label = document.createElement('div');
+      label.id = 'cover-overlay-label';
+      label.style.position = 'absolute';
+      label.style.top = '-26px';
+      label.style.left = '0';
+      label.style.background = '#2563eb';
+      label.style.color = '#fff';
+      label.style.fontSize = '12px';
+      label.style.padding = '2px 10px';
+      label.style.borderRadius = '4px 4px 0 0';
+      label.style.fontWeight = 'bold';
+      label.style.pointerEvents = 'none';
+      label.textContent = '【表紙専用枠（自由変形）】四隅で自由リサイズ・面で位置移動';
+      coverOverlayElement.appendChild(label);
+
+      // 4隅の自由リサイズハンドル
+      const handles = ['nw', 'ne', 'se', 'sw'];
+      handles.forEach(pos => {
+        const handle = document.createElement('div');
+        handle.className = `cover-resize-handle cover-handle-${pos}`;
+        handle.dataset.handle = pos;
+        handle.style.position = 'absolute';
+        handle.style.width = '14px';
+        handle.style.height = '14px';
+        handle.style.background = '#2563eb';
+        handle.style.border = '2px solid #ffffff';
+        handle.style.borderRadius = '50%';
+        handle.style.zIndex = '1000000';
+        handle.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
+
+        if (pos.includes('n')) handle.style.top = '-7px';
+        if (pos.includes('s')) handle.style.bottom = '-7px';
+        if (pos.includes('w')) handle.style.left = '-7px';
+        if (pos.includes('e')) handle.style.right = '-7px';
+
+        handle.style.cursor = (pos === 'nw' || pos === 'se') ? 'nwse-resize' : 'nesw-resize';
+        coverOverlayElement.appendChild(handle);
+      });
+
+      // 操作管理 (自由リサイズ & 移動)
+      let actionMode = null;
+      let activeHandle = null;
+      let startX = 0, startY = 0;
+      let initRect = null;
+
+      coverOverlayElement.addEventListener('mousedown', (e) => {
+        const handleTarget = e.target.closest('.cover-resize-handle');
+        initRect = coverOverlayElement.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+
+        if (handleTarget) {
+          actionMode = 'resize';
+          activeHandle = handleTarget.dataset.handle;
+          e.stopPropagation();
+          e.preventDefault();
+        } else {
+          actionMode = 'move';
+          coverOverlayElement.style.borderColor = '#1d4ed8';
+          e.preventDefault();
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!actionMode || !coverOverlayElement || !initRect) return;
+
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if (actionMode === 'move') {
+          coverOverlayElement.style.left = `${Math.round(initRect.left + dx)}px`;
+          coverOverlayElement.style.top = `${Math.round(initRect.top + dy)}px`;
+        } else if (actionMode === 'resize') {
+          let newLeft = initRect.left;
+          let newTop = initRect.top;
+          let newWidth = initRect.width;
+          let newHeight = initRect.height;
+
+          if (activeHandle.includes('e')) {
+            newWidth = Math.max(50, initRect.width + dx);
+          }
+          if (activeHandle.includes('w')) {
+            const w = initRect.width - dx;
+            if (w >= 50) {
+              newLeft = initRect.left + dx;
+              newWidth = w;
+            }
+          }
+          if (activeHandle.includes('s')) {
+            newHeight = Math.max(50, initRect.height + dy);
+          }
+          if (activeHandle.includes('n')) {
+            const h = initRect.height - dy;
+            if (h >= 50) {
+              newTop = initRect.top + dy;
+              newHeight = h;
+            }
+          }
+
+          coverOverlayElement.style.left = `${Math.round(newLeft)}px`;
+          coverOverlayElement.style.top = `${Math.round(newTop)}px`;
+          coverOverlayElement.style.width = `${Math.round(newWidth)}px`;
+          coverOverlayElement.style.height = `${Math.round(newHeight)}px`;
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (actionMode && coverOverlayElement) {
+          actionMode = null;
+          activeHandle = null;
+          initRect = null;
+          coverOverlayElement.style.borderColor = '#2563eb';
+        }
+      });
+
+      // 初期サイズ・初期位置の配置
+      const defHeight = Math.min(window.innerHeight - 80, Math.round(window.innerHeight * 0.8));
+      const defWidth = Math.min(window.innerWidth - 80, Math.round(defHeight * 0.7));
+      const defTop = Math.round((window.innerHeight - defHeight) / 2);
+      const defLeft = Math.round((window.innerWidth - defWidth) / 2);
+
+      coverOverlayElement.style.top = `${defTop}px`;
+      coverOverlayElement.style.left = `${defLeft}px`;
+      coverOverlayElement.style.width = `${defWidth}px`;
+      coverOverlayElement.style.height = `${defHeight}px`;
+
+      document.body.appendChild(coverOverlayElement);
+    }
   }
 
   function extractBookInfo() {

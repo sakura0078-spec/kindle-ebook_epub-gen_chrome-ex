@@ -33,19 +33,23 @@
         <input type="text" id="metaAuthor" placeholder="著者名（任意）">
       </div>
 
-      <!-- 表紙画像（Cover）設定 (Kindle本棚対応) -->
+      <!-- 表紙画像（Cover）個別撮影設定 (自由ドラッグ枠) -->
       <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06);">
-        <label class="checkbox-label font-medium">
-          <input type="checkbox" id="chkUseFirstPageAsCover" checked>
-          <span>最初のページ（1ページ目）を表紙に設定</span>
-        </label>
-        <div style="margin-top: 8px;">
-          <label style="font-size: 11px; color: #6b7280; display: block; margin-bottom: 4px;">または別の表紙画像を指定（任意）:</label>
-          <input type="file" id="inputCustomCover" accept="image/jpeg,image/png,image/webp" style="font-size: 11px; width: 100%;">
-          <div id="customCoverPreview" class="hidden" style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 11px; color: #10b981; font-weight: bold;">✓ 指定画像を表紙に設定中</span>
-            <button id="btnClearCustomCover" class="btn-link" style="font-size: 11px; color: #ef4444;">解除</button>
+        <label class="font-medium" style="display: block; margin-bottom: 6px;">表紙画像の設定（専用自由枠）</label>
+        <p style="font-size: 11px; color: #6b7280; margin-bottom: 8px; line-height: 1.4;">
+          ※ 表紙専用の青色枠を画面に出し、サイズや位置を自由に調整して撮影できます。
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <button id="btnToggleCoverFrame" type="button" class="btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 12px;">📐 表紙枠を表示</button>
+          <button id="btnCaptureCover" type="button" class="btn-primary" style="flex: 1; padding: 6px 10px; font-size: 12px;" disabled>📸 表紙を撮影</button>
+        </div>
+        <div id="coverPreviewContainer" class="hidden" style="display: flex; align-items: center; gap: 10px; background: #eff6ff; padding: 8px; border-radius: 6px; border: 1px solid #bfdbfe;">
+          <img id="coverThumbnail" src="" alt="表紙プレビュー" style="width: 44px; height: 60px; object-fit: cover; border-radius: 4px; border: 1px solid #93c5fd; background: #fff;">
+          <div style="flex: 1;">
+            <span style="font-size: 11px; color: #1e40af; font-weight: bold; display: block;">✓ 表紙画像設定済み</span>
+            <span id="coverSizeInfo" style="font-size: 10px; color: #3b82f6;"></span>
           </div>
+          <button id="btnClearCover" type="button" class="btn-link" style="font-size: 11px; color: #ef4444; white-space: nowrap;">✕ 解除</button>
         </div>
       </div>
     </section>
