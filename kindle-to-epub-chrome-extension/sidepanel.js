@@ -299,19 +299,19 @@
       });
 
       // 5. クロップ実行
-      const coverDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
-      const coverBlob = await (await fetch(coverDataUrl)).blob();
+      const cropRes = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+      const coverBlob = await (await fetch(cropRes.dataUrl)).blob();
 
       customCoverData = {
         blob: coverBlob,
         mimeType: settingFormat.value,
-        dataUrl: coverDataUrl,
-        width: cropArea ? cropArea.width : 0,
-        height: cropArea ? cropArea.height : 0
+        dataUrl: cropRes.dataUrl,
+        width: cropRes.width,
+        height: cropRes.height
       };
 
       // 6. UI更新 & 表紙枠を非表示にして終了
-      coverThumbnail.src = coverDataUrl;
+      coverThumbnail.src = cropRes.dataUrl;
       coverSizeInfo.textContent = `${customCoverData.width} × ${customCoverData.height} px`;
       coverPreviewContainer.classList.remove('hidden');
 
@@ -451,7 +451,8 @@
         chrome.tabs.sendMessage(tab.id, { action: 'DETECT_CROP_AREA', config: getFrameConfig(false), isCapture: true }, r);
       });
 
-      const finalDataUrl = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+      const cropRes = await cropImage(res.dataUrl, cropArea, settingFormat.value, parseInt(settingQuality.value, 10));
+      const finalDataUrl = cropRes.dataUrl;
 
       // 画面変化の重複検知（めくっても変化しない = 最終ページ到達の判定）
       const sample = finalDataUrl.substring(finalDataUrl.length - 200);
@@ -470,8 +471,8 @@
       // サムネイル更新
       thumbBox.innerHTML = `<img src="${finalDataUrl}" alt="P${currentPage}"/>`;
 
-      // IndexedDBへ一時保存
-      savePageToDB(currentPage, finalDataUrl);
+      // IndexedDBへ一時保存（寸法付き）
+      savePageToDB(currentPage, finalDataUrl, cropRes.width, cropRes.height);
 
       // Kindle側の進捗ステータス確認
       const status = await new Promise(r => chrome.tabs.sendMessage(tab.id, { action: 'GET_PAGE_STATUS' }, r));
@@ -506,12 +507,16 @@
         const sWidth = cropArea ? cropArea.width * scale : img.naturalWidth;
         const sHeight = cropArea ? cropArea.height * scale : img.naturalHeight;
 
-        canvas.width = Math.max(10, sWidth);
-        canvas.height = Math.max(10, sHeight);
+        canvas.width = Math.max(10, Math.round(sWidth));
+        canvas.height = Math.max(10, Math.round(sHeight));
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
 
-        resolve(canvas.toDataURL(format, quality / 100));
+        resolve({
+          dataUrl: canvas.toDataURL(format, quality / 100),
+          width: canvas.width,
+          height: canvas.height
+        });
       };
       img.src = dataUrl;
     });
@@ -590,12 +595,18 @@
 
       // 表紙画像（Kindle本棚対応）の設定（専用枠で撮影された表紙画像を反映）
       if (customCoverData && customCoverData.blob) {
-        builder.setCoverImage(customCoverData.blob, customCoverData.mimeType);
+        builder.setCoverImage(customCoverData.blob, customCoverData.mimeType, {
+          width: customCoverData.width,
+          height: customCoverData.height
+        });
       }
 
       for (const p of pages) {
         const blob = await (await fetch(p.dataUrl)).blob();
-        builder.addFixedPage(blob, p.pageNum, settingFormat.value);
+        builder.addFixedPage(blob, p.pageNum, settingFormat.value, {
+          width: p.width,
+          height: p.height
+        });
       }
 
       const epubBlob = await builder.build();
@@ -701,10 +712,10 @@
     timeRemaining.textContent = '残り: --:--';
   }
 
-  function savePageToDB(pageNum, dataUrl) {
+  function savePageToDB(pageNum, dataUrl, width = null, height = null) {
     if (!db) return;
     const tx = db.transaction('pages', 'readwrite');
-    tx.objectStore('pages').put({ pageNum, dataUrl });
+    tx.objectStore('pages').put({ pageNum, dataUrl, width, height });
   }
 
   function clearDB() {

@@ -1,5 +1,5 @@
-// epub-builder.js - クライアントサイドEPUB3ジェネレーター
-// JSZipライブラリを利用してEPUB構造を構築
+const _JSZip = (typeof JSZip !== 'undefined') ? JSZip : (typeof require !== 'undefined' ? require('jszip') : null);
+
 class EpubBuilder {
   constructor(metadata, options = {}) {
     this.metadata = {
@@ -30,25 +30,56 @@ class EpubBuilder {
     this.coverImage = options.coverImage || null; // { blob, mimeType }
     this.pages = []; // 画像BlobまたはHTML文字列
     this.images = []; // 挿絵
-    this.zip = new JSZip();
+    this.zip = new _JSZip();
   }
 
-  setCoverImage(imageBlob, mimeType = 'image/jpeg') {
+  setCoverImage(imageBlob, mimeType = 'image/jpeg', dimensions = null) {
     this.coverImage = {
       blob: imageBlob,
-      mimeType
+      mimeType,
+      width: dimensions ? dimensions.width : null,
+      height: dimensions ? dimensions.height : null
     };
   }
 
-  addFixedPage(imageBlob, pageNum, mimeType = 'image/jpeg') {
+  addFixedPage(imageBlob, pageNum, mimeType = 'image/jpeg', dimensions = null) {
     const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
     this.pages.push({
       type: 'image',
       pageNum,
       blob: imageBlob,
       filename: `page_${String(pageNum).padStart(4, '0')}.${ext}`,
-      mimeType
+      mimeType,
+      width: dimensions ? dimensions.width : null,
+      height: dimensions ? dimensions.height : null
     });
+  }
+
+  async getImageDimensions(blob) {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const bmp = await createImageBitmap(blob);
+        const dim = { width: bmp.width, height: bmp.height };
+        bmp.close();
+        return dim;
+      } catch (e) {}
+    }
+    if (typeof Image !== 'undefined') {
+      return new Promise(resolve => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        };
+        img.src = url;
+      });
+    }
+    return null;
   }
 
   addReflowPage(htmlContent, pageNum, images = []) {
@@ -81,8 +112,25 @@ class EpubBuilder {
     // 3. CSSスタイルシート (縦書き・固定レイアウト用)
     const cssContent = this.options.mode === 'fixed'
       ? `@page { margin: 0; padding: 0; }
-body { margin: 0; padding: 0; text-align: center; }
-img { max-width: 100%; max-height: 100%; height: 100vh; object-fit: contain; }`
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+div.svg-wrapper {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+svg {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}`
       : `body {
   writing-mode: ${this.options.writingMode};
   -webkit-writing-mode: ${this.options.writingMode};
@@ -114,7 +162,20 @@ rt { font-size: 0.5em; }`;
       // Kindle / EPUB 2 互換メタデータ
       coverMetaTag = '<meta name="cover" content="cover-image"/>';
 
-      // 表紙XHTMLページ (cover.xhtml)
+      let coverWidth = this.coverImage.width;
+      let coverHeight = this.coverImage.height;
+      if (!coverWidth || !coverHeight) {
+        const dims = await this.getImageDimensions(this.coverImage.blob);
+        if (dims) {
+          coverWidth = dims.width;
+          coverHeight = dims.height;
+        } else {
+          coverWidth = this.options.viewportWidth;
+          coverHeight = this.options.viewportHeight;
+        }
+      }
+
+      // 表紙XHTMLページ (cover.xhtml: Kindle標準SVGラッパー方式)
       const coverXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ja">
@@ -122,11 +183,14 @@ rt { font-size: 0.5em; }`;
   <meta charset="UTF-8"/>
   <title>Cover</title>
   <link rel="stylesheet" type="text/css" href="style.css"/>
-  <meta name="viewport" content="width=${this.options.viewportWidth}, height=${this.options.viewportHeight}"/>
+  <meta name="viewport" content="width=${coverWidth}, height=${coverHeight}"/>
 </head>
 <body epub:type="cover" style="margin: 0; padding: 0;">
-  <div style="text-align: center;">
-    <img src="images/${coverFilename}" alt="Cover Image" style="max-width: 100%; max-height: 100vh;"/>
+  <div class="svg-wrapper" style="width: 100%; height: 100%;">
+    <svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink"
+         width="100%" height="100%" viewBox="0 0 ${coverWidth} ${coverHeight}">
+      <image width="${coverWidth}" height="${coverHeight}" xlink:href="images/${coverFilename}"/>
+    </svg>
   </div>
 </body>
 </html>`;
@@ -141,7 +205,20 @@ rt { font-size: 0.5em; }`;
         oebps.file(`images/${p.filename}`, p.blob);
         manifestItems.push(`<item id="img_${i}" href="images/${p.filename}" media-type="${p.mimeType}"/>`);
 
-        // 画像を表示するXHTML
+        let pageWidth = p.width;
+        let pageHeight = p.height;
+        if (!pageWidth || !pageHeight) {
+          const dims = await this.getImageDimensions(p.blob);
+          if (dims) {
+            pageWidth = dims.width;
+            pageHeight = dims.height;
+          } else {
+            pageWidth = this.options.viewportWidth;
+            pageHeight = this.options.viewportHeight;
+          }
+        }
+
+        // 画像を表示するXHTML (Kindle Publishing Guidelines標準: SVGラッパー方式)
         const xhtmlFilename = `p_${String(i + 1).padStart(4, '0')}.xhtml`;
         const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -150,11 +227,14 @@ rt { font-size: 0.5em; }`;
   <meta charset="UTF-8"/>
   <title>${this.metadata.title} - Page ${i + 1}</title>
   <link rel="stylesheet" type="text/css" href="style.css"/>
-  <meta name="viewport" content="width=${this.options.viewportWidth}, height=${this.options.viewportHeight}"/>
+  <meta name="viewport" content="width=${pageWidth}, height=${pageHeight}"/>
 </head>
-<body>
-  <div>
-    <img src="images/${p.filename}" alt="Page ${i + 1}"/>
+<body style="margin: 0; padding: 0;">
+  <div class="svg-wrapper" style="width: 100%; height: 100%;">
+    <svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink"
+         width="100%" height="100%" viewBox="0 0 ${pageWidth} ${pageHeight}">
+      <image width="${pageWidth}" height="${pageHeight}" xlink:href="images/${p.filename}"/>
+    </svg>
   </div>
 </body>
 </html>`;
