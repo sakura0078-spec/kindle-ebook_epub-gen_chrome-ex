@@ -21,7 +21,10 @@
   const settingMaxPages = document.getElementById('settingMaxPages');
   const settingInterval = document.getElementById('settingInterval');
   const intervalVal = document.getElementById('intervalVal');
-  const settingSubfolder = document.getElementById('settingSubfolder');
+  const btnSelectFolder = document.getElementById('btnSelectFolder');
+  const folderPathDisplay = document.getElementById('folderPathDisplay');
+  const btnResetFolder = document.getElementById('btnResetFolder');
+  let customDirHandle = null; // FileSystemDirectoryHandle (任意フォルダ直接出力用)
   const progressBar = document.getElementById('progressBar');
   const pageCount = document.getElementById('pageCount');
   const timeRemaining = document.getElementById('timeRemaining');
@@ -47,16 +50,22 @@
   const btnClearCustomCover = document.getElementById('btnClearCustomCover');
   let customCoverData = null; // { blob, mimeType }
 
-  // IndexedDB初期化 (メモリクラッシュ防止)
+  // IndexedDB初期化 (メモリクラッシュ防止 + ディレクトリハンドル保存)
   let db = null;
-  const dbReq = indexedDB.open('KindleEpubDB', 1);
+  const dbReq = indexedDB.open('KindleEpubDB', 2);
   dbReq.onupgradeneeded = (e) => {
     const d = e.target.result;
     if (!d.objectStoreNames.contains('pages')) {
       d.createObjectStore('pages', { keyPath: 'pageNum' });
     }
+    if (!d.objectStoreNames.contains('config')) {
+      d.createObjectStore('config', { keyPath: 'key' });
+    }
   };
-  dbReq.onsuccess = (e) => { db = e.target.result; };
+  dbReq.onsuccess = (e) => {
+    db = e.target.result;
+    loadSavedDirectoryHandle();
+  };
 
   // コンテントスクリプトからのリアルタイム連動（画面枠直接ドラッグリサイズ時）
   chrome.runtime.onMessage.addListener((msg) => {
@@ -77,16 +86,74 @@
     intervalVal.textContent = s + ' 秒';
   });
 
-  // 保存先フォルダの永続化
-  chrome.storage.local.get(['subfolder'], (res) => {
-    if (res && res.subfolder) {
-      settingSubfolder.value = res.subfolder;
+  // フォルダピッカー (File System Access API) による保存先フォルダ選択
+  btnSelectFolder.addEventListener('click', async () => {
+    try {
+      if (typeof window.showDirectoryPicker !== 'function') {
+        alert('お使いの環境ではフォルダ選択APIがサポートされていません。既定のダウンロードフォルダが使用されます。');
+        return;
+      }
+      const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      if (dirHandle) {
+        customDirHandle = dirHandle;
+        saveDirectoryHandle(dirHandle);
+        folderPathDisplay.textContent = `📁 ${dirHandle.name}`;
+        folderPathDisplay.title = dirHandle.name;
+        btnResetFolder.classList.remove('hidden');
+        statusMessage.textContent = `保存先フォルダを「${dirHandle.name}」に設定しました`;
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Folder picker error:', err);
+      }
     }
   });
-  settingSubfolder.addEventListener('change', () => {
-    const val = settingSubfolder.value.trim() || 'KindleBooks';
-    chrome.storage.local.set({ subfolder: val });
+
+  btnResetFolder.addEventListener('click', () => {
+    customDirHandle = null;
+    clearSavedDirectoryHandle();
+    folderPathDisplay.textContent = '未設定（ブラウザのダウンロード/KindleBooks）';
+    folderPathDisplay.title = '';
+    btnResetFolder.classList.add('hidden');
+    statusMessage.textContent = '保存先を既定のダウンロードフォルダに戻しました';
   });
+
+  function saveDirectoryHandle(handle) {
+    if (!db) return;
+    try {
+      const tx = db.transaction('config', 'readwrite');
+      tx.objectStore('config').put({ key: 'outputDirHandle', handle, name: handle.name });
+    } catch (e) {
+      console.warn('Failed to save directory handle:', e);
+    }
+  }
+
+  function clearSavedDirectoryHandle() {
+    if (!db) return;
+    try {
+      const tx = db.transaction('config', 'readwrite');
+      tx.objectStore('config').delete('outputDirHandle');
+    } catch (e) {}
+  }
+
+  async function loadSavedDirectoryHandle() {
+    if (!db) return;
+    try {
+      const tx = db.transaction('config', 'readonly');
+      const req = tx.objectStore('config').get('outputDirHandle');
+      req.onsuccess = async () => {
+        const res = req.result;
+        if (res && res.handle) {
+          customDirHandle = res.handle;
+          folderPathDisplay.textContent = `📁 ${res.name || res.handle.name || '選択済みフォルダ'}`;
+          folderPathDisplay.title = res.name || res.handle.name;
+          btnResetFolder.classList.remove('hidden');
+        }
+      };
+    } catch (e) {
+      console.warn('Failed to load saved directory handle:', e);
+    }
+  }
 
   frameScale.addEventListener('input', (e) => {
     frameScaleVal.textContent = e.target.value + '%';
@@ -433,12 +500,53 @@
       }
 
       const epubBlob = await builder.build();
-      const blobUrl = URL.createObjectURL(epubBlob);
       // ファイル名は純粋な書籍名のみ（著者名は含めない、Windows禁止文字を置換）
       let rawTitle = metaTitle.value ? metaTitle.value.trim() : 'Kindle_Book';
       const safeTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'Kindle_Book';
       const filename = `${safeTitle}.epub`;
-      const subfolder = (settingSubfolder.value && settingSubfolder.value.trim()) || 'KindleBooks';
+
+      // 1. ユーザーが指定した保存先フォルダ (File System Access API) が存在する場合
+      if (customDirHandle) {
+        try {
+          // 権限確認（未許可の場合はリクエスト）
+          let hasPermission = false;
+          try {
+            if ((await customDirHandle.queryPermission({ mode: 'readwrite' })) === 'granted') {
+              hasPermission = true;
+            } else if ((await customDirHandle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+              hasPermission = true;
+            }
+          } catch(e) {
+            hasPermission = true;
+          }
+
+          if (hasPermission) {
+            const fileHandle = await customDirHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(epubBlob);
+            await writable.close();
+
+            chrome.runtime.sendMessage({
+              type: 'SHOW_NOTIFICATION',
+              title: 'Kindle to EPUB 完了',
+              message: `${filename} (${pages.length}ページ) を保存しました。`
+            });
+
+            statusMessage.textContent = `完了！ フォルダ「${customDirHandle.name}」へ ${filename} (${pages.length}ページ) を保存しました`;
+            resetUI();
+            btnStart.classList.remove('hidden');
+            btnPause.classList.add('hidden');
+            subActions.classList.add('hidden');
+            return;
+          }
+        } catch (dirErr) {
+          console.warn('Custom directory write failed, falling back to downloads API:', dirErr);
+        }
+      }
+
+      // 2. フォルダー未指定またはアクセス失敗時のフォールバック (既定のDownloads/KindleBooksへ保存)
+      const blobUrl = URL.createObjectURL(epubBlob);
+      const subfolder = 'KindleBooks';
 
       chrome.runtime.sendMessage({
         type: 'SAVE_EPUB_FILE',

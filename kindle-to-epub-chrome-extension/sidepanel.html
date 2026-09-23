@@ -64,9 +64,8 @@
       <div class="setting-row" id="formatRow">
         <label>画像形式</label>
         <select id="settingFormat">
-          <option value="image/jpeg" selected>JPEG (軽量・高画質)</option>
-          <option value="image/png">PNG (劣化なし線画)</option>
-          <option value="image/webp">WebP (最新高圧縮)</option>
+          <option value="image/jpeg" selected>JPEG (軽量・高画質 / Kindle推奨)</option>
+          <option value="image/png">PNG (劣化なし線画 / Kindle対応)</option>
         </select>
       </div>
 
@@ -99,9 +98,15 @@
         <p style="font-size: 10px; color: #9ca3af; margin-top: 4px;">※ 最短で安全な0.8〜1.0秒推奨。仕上がりの描画遅れを見て調整してください。</p>
       </div>
 
-      <div class="setting-row">
-        <label>保存先フォルダ (Downloads配下)</label>
-        <input type="text" id="settingSubfolder" value="KindleBooks" placeholder="例: KindleBooks" style="width: 150px;">
+      <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <label class="font-medium">出力保存先フォルダ</label>
+          <button id="btnSelectFolder" class="btn-link" style="font-weight: 600;">📁 フォルダを選択</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; width: 100%; background: #f1f5f9; padding: 6px 8px; border-radius: 6px;">
+          <span id="folderPathDisplay" style="font-size: 11px; color: #475569; flex: 1; word-break: break-all;">未設定（ブラウザのダウンロード/KindleBooks）</span>
+          <button id="btnResetFolder" class="btn-link hidden" style="font-size: 11px; color: #ef4444; white-space: nowrap;">解除</button>
+        </div>
       </div>
     </section>
 
