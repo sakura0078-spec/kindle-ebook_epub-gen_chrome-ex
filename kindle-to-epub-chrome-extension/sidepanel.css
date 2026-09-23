@@ -65,3 +65,17 @@ body { background: var(--bg-primary); color: var(--text-main); font-size: 13px; 
 .crop-input-item { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
 .crop-input-item input { width: 52px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; text-align: right; }
 .crop-note { font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-top: 2px; }
+
+/* 拡大プレビュー用スタイル */
+.thumbnail-box { position: relative; cursor: pointer; transition: border-color 0.2s; }
+.thumbnail-box:hover { border-color: var(--accent); }
+.thumb-zoom-hint { position: absolute; bottom: 4px; right: 4px; background: rgba(15, 23, 42, 0.75); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 12px; }
+.modal-content { background: var(--bg-card); border-radius: var(--radius); width: 100%; max-width: 95vw; height: 95vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #0f172a; color: #fff; }
+.modal-title { font-size: 12px; font-weight: 600; }
+.btn-close { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 0 4px; }
+.btn-close:hover { color: #fff; }
+.modal-body { flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; background: #1e293b; padding: 8px; }
+.modal-body img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }

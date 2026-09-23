@@ -168,8 +168,11 @@
       </div>
 
       <div class="thumbnail-preview-container">
-        <p class="preview-label">最新キャプチャ画面</p>
-        <div class="thumbnail-box" id="thumbBox">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <p class="preview-label">最新キャプチャ画面</p>
+          <span style="font-size: 10px; color: #2563eb; cursor: pointer;" id="btnZoomThumb">🔍 拡大表示</span>
+        </div>
+        <div class="thumbnail-box" id="thumbBox" title="クリックして拡大表示">
           <span class="thumb-placeholder">スキャン待機中</span>
         </div>
       </div>
@@ -191,6 +194,19 @@
         <button id="btnAbort" class="btn btn-danger" title="処理を中止">中止</button>
       </div>
     </footer>
+  </div>
+
+  <!-- 拡大プレビュー用モーダル (LightBox) -->
+  <div id="imageModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="modalTitle" class="modal-title">キャプチャ詳細プレビュー</span>
+        <button id="btnCloseModal" class="btn-close" type="button" title="閉じる">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <img id="modalImage" src="" alt="拡大画像プレビュー">
+      </div>
+    </div>
   </div>
 
   <script src="sidepanel.js"></script>

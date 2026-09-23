@@ -52,8 +52,15 @@
   const coverThumbnail = document.getElementById('coverThumbnail');
   const coverSizeInfo = document.getElementById('coverSizeInfo');
   const btnClearCover = document.getElementById('btnClearCover');
+  const imageModal = document.getElementById('imageModal');
+  const modalImage = document.getElementById('modalImage');
+  const modalTitle = document.getElementById('modalTitle');
+  const btnCloseModal = document.getElementById('btnCloseModal');
+  const btnZoomThumb = document.getElementById('btnZoomThumb');
   let isCoverOverlayVisible = false;
   let customCoverData = null; // { blob, mimeType, dataUrl, width, height }
+  let latestCapturedDataUrl = null;
+  let latestCapturedPageNum = 0;
 
   // IndexedDB初期化 (メモリクラッシュ防止 + ディレクトリハンドル保存)
   let db = null;
@@ -334,6 +341,49 @@
     statusMessage.textContent = '設定済み表紙画像を解除しました';
   });
 
+  // 拡大プレビューモーダル制御
+  function openZoomModal(dataUrl, title = 'キャプチャ詳細プレビュー') {
+    if (!dataUrl) return;
+    modalImage.src = dataUrl;
+    modalTitle.textContent = title;
+    imageModal.classList.remove('hidden');
+  }
+
+  function closeZoomModal() {
+    imageModal.classList.add('hidden');
+    modalImage.src = '';
+  }
+
+  thumbBox.addEventListener('click', () => {
+    if (latestCapturedDataUrl) {
+      openZoomModal(latestCapturedDataUrl, `P.${latestCapturedPageNum} キャプチャプレビュー`);
+    }
+  });
+
+  btnZoomThumb.addEventListener('click', () => {
+    if (latestCapturedDataUrl) {
+      openZoomModal(latestCapturedDataUrl, `P.${latestCapturedPageNum} キャプチャプレビュー`);
+    }
+  });
+
+  coverThumbnail.addEventListener('click', () => {
+    if (customCoverData && customCoverData.dataUrl) {
+      openZoomModal(customCoverData.dataUrl, '表紙画像プレビュー');
+    }
+  });
+
+  btnCloseModal.addEventListener('click', closeZoomModal);
+  imageModal.addEventListener('click', (e) => {
+    if (e.target === imageModal || e.target.id === 'modalBody') {
+      closeZoomModal();
+    }
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !imageModal.classList.contains('hidden')) {
+      closeZoomModal();
+    }
+  });
+
   // メタデータ手動再取得ボタン
   btnReloadMetadata.addEventListener('click', async () => {
     statusMessage.textContent = 'メタデータを再取得中...';
@@ -375,6 +425,24 @@
         }
       } catch(e) {}
     }
+
+    // 保存先フォルダが指定されている場合、ユーザー操作コンテキスト（User Activation）のうちに権限を事前確認・更新
+    if (customDirHandle) {
+      try {
+        let perm = await customDirHandle.queryPermission({ mode: 'readwrite' });
+        if (perm !== 'granted') {
+          perm = await customDirHandle.requestPermission({ mode: 'readwrite' });
+        }
+        if (perm !== 'granted') {
+          console.warn('保存先フォルダへの書き込み権限が得られませんでした');
+        }
+      } catch (err) {
+        console.warn('フォルダ権限の事前取得エラー:', err);
+      }
+    }
+
+    // キャプチャ中の枠線映り込み・チラつきを完全に防止するため画面上の枠を強制非表示
+    await updateCropOverlay(false);
 
     isScanning = true;
     isPaused = false;
@@ -484,8 +552,13 @@
       currentPage++;
       updateProgressUI();
 
-      // サムネイル更新
-      thumbBox.innerHTML = `<img src="${finalDataUrl}" alt="P${currentPage}"/>`;
+      // サムネイル更新 & 拡大プレビュー用データ保持
+      latestCapturedDataUrl = finalDataUrl;
+      latestCapturedPageNum = currentPage;
+      thumbBox.innerHTML = `
+        <img src="${finalDataUrl}" alt="P${currentPage}"/>
+        <span class="thumb-zoom-hint">🔍 P.${currentPage} 拡大</span>
+      `;
 
       // IndexedDBへ一時保存（寸法付き）
       savePageToDB(currentPage, finalDataUrl, cropRes.width, cropRes.height);
@@ -552,21 +625,27 @@
     });
   }
 
-  function pauseScan() {
+  async function pauseScan() {
     isPaused = true;
     clearTimeout(scanTimer);
     clearTimeout(timeoutTimer);
     btnPause.classList.add('hidden');
     btnResume.classList.remove('hidden');
-    statusMessage.textContent = '一時停止中';
+    statusMessage.textContent = '一時停止中 (サムネイルをクリックで拡大確認できます)';
+    // 一時停止時は位置確認のため設定に応じて枠を復元
+    if (chkShowOverlay.checked) {
+      updateCropOverlay(false);
+    }
   }
 
-  function resumeScan() {
+  async function resumeScan() {
     isPaused = false;
     btnResume.classList.add('hidden');
     btnPause.classList.remove('hidden');
     statusMessage.textContent = 'スキャン中...';
     warningAlert.classList.add('hidden');
+    // 再開時は枠を強制非表示にして撮影再開
+    await updateCropOverlay(false);
     loopNextStep();
   }
 
@@ -578,6 +657,9 @@
     clearDB();
     resetUI();
     statusMessage.textContent = 'スキャンを中止しました';
+    if (chkShowOverlay.checked) {
+      updateCropOverlay(false);
+    }
   }
 
   function retryCurrentPage() {
@@ -590,6 +672,9 @@
     isPaused = false;
     clearTimeout(scanTimer);
     clearTimeout(timeoutTimer);
+    if (chkShowOverlay.checked) {
+      updateCropOverlay(false);
+    }
     statusMessage.textContent = `全 ${currentPage} ページのEPUBファイルを構築中...`;
     progressBar.style.width = '100%';
 
